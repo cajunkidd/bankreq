@@ -3,7 +3,7 @@ from datetime import date, datetime
 from io import BytesIO
 
 from openpyxl import load_workbook
-from openpyxl.styles import Border, Font, Side
+from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.workbook import Workbook
 
 SOURCE_SHEET = "Net Sales"
@@ -78,33 +78,38 @@ def _ingest_sheet(ws, aggregated, site_meta, date_counts) -> bool:
 
 
 def _read_source_rows(wb: Workbook):
+    """Return (sources, site_meta, funded_date) where sources is a dict
+    keyed by source-sheet name -> {(alt_id, product_code): amount}.
+    Net Sales is required; the others are optional and skipped if absent
+    or empty."""
     if SOURCE_SHEET not in wb.sheetnames:
         raise ValueError(
             f"Workbook is missing the required '{SOURCE_SHEET}' sheet. "
             f"Found sheets: {wb.sheetnames}"
         )
 
-    aggregated: dict[tuple, float] = defaultdict(float)
+    sources: dict[str, dict[tuple, float]] = {}
     site_meta: dict[str, tuple[str, str]] = {}
     date_counts: Counter = Counter()
 
-    primary_ok = _ingest_sheet(
-        wb[SOURCE_SHEET], aggregated, site_meta, date_counts
-    )
-    if not primary_ok:
+    net_sales: dict[tuple, float] = defaultdict(float)
+    if not _ingest_sheet(wb[SOURCE_SHEET], net_sales, site_meta, date_counts):
         raise ValueError(
             f"'{SOURCE_SHEET}' sheet is missing required columns: "
             f"{sorted(REQUIRED_COLUMNS)}"
         )
+    sources[SOURCE_SHEET] = net_sales
 
     for sheet_name in ADDITIONAL_SOURCE_SHEETS:
-        if sheet_name in wb.sheetnames:
-            _ingest_sheet(
-                wb[sheet_name], aggregated, site_meta, date_counts
-            )
+        if sheet_name not in wb.sheetnames:
+            continue
+        agg: dict[tuple, float] = defaultdict(float)
+        _ingest_sheet(wb[sheet_name], agg, site_meta, date_counts)
+        if agg:
+            sources[sheet_name] = agg
 
     funded_date = date_counts.most_common(1)[0][0] if date_counts else None
-    return aggregated, site_meta, funded_date
+    return sources, site_meta, funded_date
 
 
 def _next_sheet_name(wb: Workbook) -> str:
@@ -125,24 +130,21 @@ def _box_border(top: bool, bottom: bool, left: bool, right: bool) -> Border:
     )
 
 
-def _write_output_sheet(wb: Workbook, aggregated, site_meta) -> str:
-    name = _next_sheet_name(wb)
-    ws = wb.create_sheet(name, 0)
-    wb.active = 0
+def _draw_box(ws, top_row: int, bottom_row: int) -> None:
+    for r in range(top_row, bottom_row + 1):
+        for c in range(1, 7):
+            ws.cell(row=r, column=c).border = _box_border(
+                top=(r == top_row),
+                bottom=(r == bottom_row),
+                left=(c == 1),
+                right=(c == 6),
+            )
 
-    bold = Font(bold=True)
-    header_border = Border(bottom=THIN)
-    for col_idx, header in enumerate(OUTPUT_HEADERS, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        if header is not None:
-            cell.font = bold
-            cell.border = header_border
 
-    for letter, width in COLUMN_WIDTHS.items():
-        ws.column_dimensions[letter].width = width
-
+def _write_net_sales_section(ws, aggregated, site_meta, start_row: int) -> int:
+    """Write the per-site Net Sales boxes. Returns the next free row."""
     sites = sorted(site_meta.keys(), key=lambda s: str(s))
-    current_row = 2
+    current_row = start_row
     for alt_id in sites:
         sname, fdate = site_meta[alt_id]
         products = sorted(
@@ -166,26 +168,92 @@ def _write_output_sheet(wb: Workbook, aggregated, site_meta) -> str:
             current_row += 1
         last_row = current_row - 1
 
-        # Subtotal on the last row of the group: SUM of non-Amex rows.
-        # Skip when the site has only one row (no breakdown to subtotal).
         if last_row > site_start_row and first_non_amex_row is not None:
             sub_cell = ws.cell(row=last_row, column=6)
             sub_cell.value = f"=SUM(E{first_non_amex_row}:E{last_row})"
             sub_cell.number_format = AMOUNT_FORMAT
 
-        # Draw the compartment: box around non-Amex rows (the bank-deposit
-        # portion). Amex rows sit outside the box because they're funded
-        # separately by Amex.
         box_start = first_non_amex_row if first_non_amex_row else site_start_row
-        if box_start is None or box_start > last_row:
+        if box_start is not None and box_start <= last_row:
+            _draw_box(ws, box_start, last_row)
+    return current_row
+
+
+def _write_aux_section(
+    ws, label: str, agg: dict, site_meta: dict, start_row: int
+) -> int:
+    """Write a labeled, boxed section for an auxiliary data source
+    (Adjustments, Chargebacks). Returns the next free row."""
+    # Section label row spanning A:F
+    label_row = start_row
+    ws.merge_cells(
+        start_row=label_row, start_column=1, end_row=label_row, end_column=6
+    )
+    label_cell = ws.cell(row=label_row, column=1, value=f"From: {label}")
+    label_cell.font = Font(bold=True, color="FFFFFF", size=11)
+    label_cell.fill = PatternFill(
+        fill_type="solid", start_color="008445", end_color="008445"
+    )
+
+    data_start = label_row + 1
+    current_row = data_start
+    keys = sorted(agg.keys(), key=lambda k: (str(k[0]), _product_sort_key(k[1])))
+    for alt_id, pc in keys:
+        sname, fdate = site_meta.get(alt_id, (None, None))
+        amt = agg[(alt_id, pc)]
+        ws.cell(row=current_row, column=1, value=alt_id)
+        ws.cell(row=current_row, column=2, value=fdate)
+        ws.cell(row=current_row, column=3, value=sname)
+        ws.cell(row=current_row, column=4, value=pc)
+        amt_cell = ws.cell(row=current_row, column=5, value=amt)
+        amt_cell.number_format = AMOUNT_FORMAT
+        current_row += 1
+
+    data_last = current_row - 1
+    if data_last >= data_start:
+        # Total in column F on the last row of the section.
+        total_cell = ws.cell(row=data_last, column=6)
+        total_cell.value = f"=SUM(E{data_start}:E{data_last})"
+        total_cell.number_format = AMOUNT_FORMAT
+        # Box the section, label row included.
+        _draw_box(ws, label_row, data_last)
+    else:
+        # Section had no data rows somehow — still box the label so it
+        # doesn't dangle. (Shouldn't normally hit this path because we
+        # only write a section when agg is non-empty.)
+        _draw_box(ws, label_row, label_row)
+
+    return current_row
+
+
+def _write_output_sheet(wb: Workbook, sources, site_meta) -> str:
+    name = _next_sheet_name(wb)
+    ws = wb.create_sheet(name, 0)
+    wb.active = 0
+
+    bold = Font(bold=True)
+    header_border = Border(bottom=THIN)
+    for col_idx, header in enumerate(OUTPUT_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        if header is not None:
+            cell.font = bold
+            cell.border = header_border
+
+    for letter, width in COLUMN_WIDTHS.items():
+        ws.column_dimensions[letter].width = width
+
+    next_row = _write_net_sales_section(
+        ws, sources.get(SOURCE_SHEET, {}), site_meta, start_row=2
+    )
+
+    for sheet_name in ADDITIONAL_SOURCE_SHEETS:
+        agg = sources.get(sheet_name)
+        if not agg:
             continue
-        for r in range(box_start, last_row + 1):
-            top = r == box_start
-            bottom = r == last_row
-            for c in range(1, 7):
-                left = c == 1
-                right = c == 6
-                ws.cell(row=r, column=c).border = _box_border(top, bottom, left, right)
+        next_row += 1  # blank separator row
+        next_row = _write_aux_section(
+            ws, sheet_name, agg, site_meta, start_row=next_row
+        )
 
     return name
 
@@ -211,8 +279,8 @@ def reformat_workbook(file_bytes: bytes) -> tuple[bytes, str, date]:
     (auto-suffixed if one already exists), and return
     (workbook_bytes, sheet_name, funded_date)."""
     wb = load_workbook(BytesIO(file_bytes))
-    aggregated, site_meta, raw_date = _read_source_rows(wb)
-    sheet_name = _write_output_sheet(wb, aggregated, site_meta)
+    sources, site_meta, raw_date = _read_source_rows(wb)
+    sheet_name = _write_output_sheet(wb, sources, site_meta)
     out = BytesIO()
     wb.save(out)
     return out.getvalue(), sheet_name, _normalize_date(raw_date)
