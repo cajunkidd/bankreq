@@ -29,7 +29,7 @@ COLUMN_WIDTHS = {
 }
 
 THIN = Side(style="thin")
-MED = Side(style="medium")
+THICK = Side(style="thick")
 NONE_SIDE = Side(style=None)
 
 
@@ -88,16 +88,17 @@ def _next_sheet_name(wb: Workbook) -> str:
 
 def _box_border(top: bool, bottom: bool, left: bool, right: bool) -> Border:
     return Border(
-        top=MED if top else NONE_SIDE,
-        bottom=MED if bottom else NONE_SIDE,
-        left=MED if left else NONE_SIDE,
-        right=MED if right else NONE_SIDE,
+        top=THICK if top else NONE_SIDE,
+        bottom=THICK if bottom else NONE_SIDE,
+        left=THICK if left else NONE_SIDE,
+        right=THICK if right else NONE_SIDE,
     )
 
 
 def _write_output_sheet(wb: Workbook, aggregated, site_meta) -> str:
     name = _next_sheet_name(wb)
-    ws = wb.create_sheet(name)
+    ws = wb.create_sheet(name, 0)
+    wb.active = 0
 
     bold = Font(bold=True)
     header_border = Border(bottom=THIN)
