@@ -11,7 +11,7 @@ app = FastAPI(title="Bank Reconciliation Reformatter")
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-INDEX_HTML = (STATIC_DIR / "index.html").read_text()
+INDEX_HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
 XLSX_MIME = (
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
