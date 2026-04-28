@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Bank Reconciliation Reformatter</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --fg: #1f2937;
+    --muted: #6b7280;
+    --border: #d1d5db;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --bg: #f9fafb;
+    --panel: #ffffff;
+    --error: #b91c1c;
+    --ok: #166534;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  .card {
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 2.5rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+    max-width: 560px;
+    width: 100%;
+  }
+  h1 { margin: 0 0 0.5rem 0; font-size: 1.5rem; }
+  p.subtitle { margin: 0 0 1.5rem 0; color: var(--muted); }
+  .drop {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 2.5rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .drop:hover, .drop.dragging {
+    border-color: var(--accent);
+    background: #eff6ff;
+  }
+  .drop strong { display: block; margin-bottom: 0.25rem; }
+  .drop span { color: var(--muted); font-size: 0.9rem; }
+  input[type=file] { display: none; }
+  .filename {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background: #f3f4f6;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    word-break: break-all;
+  }
+  button {
+    margin-top: 1rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent);
+    color: white;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:disabled { background: #9ca3af; cursor: not-allowed; }
+  .status { margin-top: 1rem; font-size: 0.9rem; }
+  .status.error { color: var(--error); }
+  .status.ok { color: var(--ok); }
+  .help {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e5e7eb;
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Bank Reconciliation Reformatter</h1>
+  <p class="subtitle">Upload the raw merchant-services Excel export. The app will add a formatted <code>Net Sales (2)</code> sheet and return the file.</p>
+
+  <label class="drop" id="drop">
+    <strong>Drop .xlsx file here</strong>
+    <span>or click to choose</span>
+    <input type="file" id="file" accept=".xlsx" />
+  </label>
+
+  <div class="filename" id="filename" style="display:none"></div>
+  <button id="submit" disabled>Reformat</button>
+  <div class="status" id="status"></div>
+
+  <div class="help">
+    Aggregates rows in the <code>Net Sales</code> sheet by Site &amp; Product Code, sorts alphabetically, and adds a per-site subtotal (excluding Amex) on the last row of each group.
+  </div>
+</div>
+
+<script>
+  const drop = document.getElementById("drop");
+  const fileInput = document.getElementById("file");
+  const filenameEl = document.getElementById("filename");
+  const submitBtn = document.getElementById("submit");
+  const statusEl = document.getElementById("status");
+  let chosen = null;
+
+  function setFile(f) {
+    chosen = f;
+    if (f) {
+      filenameEl.textContent = f.name;
+      filenameEl.style.display = "block";
+      submitBtn.disabled = false;
+      statusEl.textContent = "";
+      statusEl.className = "status";
+    } else {
+      filenameEl.style.display = "none";
+      submitBtn.disabled = true;
+    }
+  }
+
+  drop.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    drop.classList.add("dragging");
+  });
+  drop.addEventListener("dragleave", () => drop.classList.remove("dragging"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    drop.classList.remove("dragging");
+    if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener("change", (e) => {
+    if (e.target.files.length) setFile(e.target.files[0]);
+  });
+
+  submitBtn.addEventListener("click", async () => {
+    if (!chosen) return;
+    submitBtn.disabled = true;
+    statusEl.textContent = "Reformatting...";
+    statusEl.className = "status";
+    const form = new FormData();
+    form.append("file", chosen);
+    try {
+      const res = await fetch("/reformat", { method: "POST", body: form });
+      if (!res.ok) {
+        const text = await res.text();
+        let msg = text;
+        try { msg = JSON.parse(text).detail || text; } catch {}
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      const m = cd.match(/filename="([^"]+)"/);
+      const name = m ? m[1] : "formatted.xlsx";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+      statusEl.textContent = "Done. File downloaded.";
+      statusEl.className = "status ok";
+    } catch (err) {
+      statusEl.textContent = "Error: " + err.message;
+      statusEl.className = "status error";
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
