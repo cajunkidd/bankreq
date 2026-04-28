@@ -7,6 +7,7 @@ from openpyxl.styles import Border, Font, Side
 from openpyxl.workbook import Workbook
 
 SOURCE_SHEET = "Net Sales"
+ADDITIONAL_SOURCE_SHEETS = ("Adjustments", "Chargebacks & Chargeback Revers")
 OUTPUT_SHEET_BASE = "Formatted"
 
 OUTPUT_HEADERS = [
@@ -38,31 +39,27 @@ def _product_sort_key(pc: str) -> str:
     return (pc or "").lower()
 
 
-def _read_source_rows(wb: Workbook):
-    if SOURCE_SHEET not in wb.sheetnames:
-        raise ValueError(
-            f"Workbook is missing the required '{SOURCE_SHEET}' sheet. "
-            f"Found sheets: {wb.sheetnames}"
-        )
-    ws = wb[SOURCE_SHEET]
-    headers = [c.value for c in ws[1]]
-    required = {
-        "Site Alternate ID",
-        "Site Name",
-        "Funded Date",
-        "Product Code",
-        "Processed Transaction Amount",
-    }
-    missing = required - set(headers)
-    if missing:
-        raise ValueError(
-            f"'{SOURCE_SHEET}' sheet is missing required columns: {sorted(missing)}"
-        )
-    idx = {name: headers.index(name) for name in required}
+REQUIRED_COLUMNS = (
+    "Site Alternate ID",
+    "Site Name",
+    "Funded Date",
+    "Product Code",
+    "Processed Transaction Amount",
+)
 
-    aggregated: dict[tuple, float] = defaultdict(float)
-    site_meta: dict[str, tuple[str, str]] = {}
-    date_counts: Counter = Counter()
+
+def _ingest_sheet(ws, aggregated, site_meta, date_counts) -> bool:
+    """Read rows from a single sheet into the shared aggregates. Returns
+    True if the sheet had a recognisable header, False otherwise (which
+    we treat as 'empty/blank' and skip silently)."""
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        return False
+    headers = list(header_row)
+    if not set(REQUIRED_COLUMNS).issubset(set(headers)):
+        return False
+    idx = {name: headers.index(name) for name in REQUIRED_COLUMNS}
+
     for row in ws.iter_rows(min_row=2, values_only=True):
         if row is None or all(v is None for v in row):
             continue
@@ -77,6 +74,34 @@ def _read_source_rows(wb: Workbook):
         site_meta.setdefault(alt_id, (sname, fdate))
         if fdate is not None:
             date_counts[fdate] += 1
+    return True
+
+
+def _read_source_rows(wb: Workbook):
+    if SOURCE_SHEET not in wb.sheetnames:
+        raise ValueError(
+            f"Workbook is missing the required '{SOURCE_SHEET}' sheet. "
+            f"Found sheets: {wb.sheetnames}"
+        )
+
+    aggregated: dict[tuple, float] = defaultdict(float)
+    site_meta: dict[str, tuple[str, str]] = {}
+    date_counts: Counter = Counter()
+
+    primary_ok = _ingest_sheet(
+        wb[SOURCE_SHEET], aggregated, site_meta, date_counts
+    )
+    if not primary_ok:
+        raise ValueError(
+            f"'{SOURCE_SHEET}' sheet is missing required columns: "
+            f"{sorted(REQUIRED_COLUMNS)}"
+        )
+
+    for sheet_name in ADDITIONAL_SOURCE_SHEETS:
+        if sheet_name in wb.sheetnames:
+            _ingest_sheet(
+                wb[sheet_name], aggregated, site_meta, date_counts
+            )
 
     funded_date = date_counts.most_common(1)[0][0] if date_counts else None
     return aggregated, site_meta, funded_date
