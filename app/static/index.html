@@ -6,129 +6,289 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   :root {
-    --fg: #1f2937;
-    --muted: #6b7280;
-    --border: #d1d5db;
+    --fg: #0f172a;
+    --muted: #64748b;
+    --subtle: #94a3b8;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
-    --bg: #f9fafb;
+    --accent-soft: #eff6ff;
+    --bg: #f1f5f9;
     --panel: #ffffff;
-    --error: #b91c1c;
-    --ok: #166534;
+    --error: #dc2626;
+    --error-bg: #fef2f2;
+    --ok: #15803d;
+    --ok-bg: #f0fdf4;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-      "Helvetica Neue", Arial, sans-serif;
-    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter",
+      Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
     color: var(--fg);
-    min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2rem;
+    padding: 2rem 1rem;
   }
   .card {
     background: var(--panel);
-    border-radius: 12px;
+    border-radius: 16px;
     padding: 2.5rem;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-    max-width: 560px;
+    box-shadow:
+      0 1px 3px rgba(15, 23, 42, 0.04),
+      0 10px 40px rgba(15, 23, 42, 0.08);
     width: 100%;
+    max-width: 520px;
   }
-  h1 { margin: 0 0 0.5rem 0; font-size: 1.5rem; }
-  p.subtitle { margin: 0 0 1.5rem 0; color: var(--muted); }
+  .header { margin-bottom: 1.75rem; }
+  h1 {
+    margin: 0 0 0.4rem 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+  .subtitle code {
+    background: #f1f5f9;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: var(--fg);
+  }
+
   .drop {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 2.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    border: 2px dashed var(--border-strong);
+    border-radius: 12px;
+    padding: 2.75rem 1.5rem;
     text-align: center;
     cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
+    background: #fafbfc;
+    transition: border-color 0.15s, background 0.15s, transform 0.1s;
   }
-  .drop:hover, .drop.dragging {
+  .drop:hover {
     border-color: var(--accent);
-    background: #eff6ff;
+    background: var(--accent-soft);
   }
-  .drop strong { display: block; margin-bottom: 0.25rem; }
-  .drop span { color: var(--muted); font-size: 0.9rem; }
-  input[type=file] { display: none; }
-  .filename {
+  .drop.dragging {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    transform: scale(1.01);
+  }
+  .drop.has-file {
+    border-style: solid;
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .drop-icon {
+    width: 44px;
+    height: 44px;
+    color: var(--subtle);
+    transition: color 0.15s;
+  }
+  .drop:hover .drop-icon,
+  .drop.dragging .drop-icon,
+  .drop.has-file .drop-icon { color: var(--accent); }
+  .drop-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .drop-hint {
+    font-size: 0.875rem;
+    color: var(--muted);
+  }
+  .drop input[type=file] {
+    position: absolute;
+    width: 1px; height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .file-row {
+    display: none;
+    align-items: center;
+    gap: 0.75rem;
     margin-top: 1rem;
     padding: 0.75rem 1rem;
-    background: #f3f4f6;
-    border-radius: 6px;
+    background: var(--accent-soft);
+    border: 1px solid #dbeafe;
+    border-radius: 8px;
     font-size: 0.9rem;
-    word-break: break-all;
   }
-  button {
-    margin-top: 1rem;
-    width: 100%;
-    padding: 0.75rem 1rem;
+  .file-row.show { display: flex; }
+  .file-row .file-icon {
+    width: 18px; height: 18px;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .file-row .file-name {
+    flex: 1;
+    word-break: break-all;
+    color: var(--fg);
+    font-weight: 500;
+  }
+  .file-row .file-clear {
     border: 0;
-    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .file-row .file-clear:hover { background: #dbeafe; color: var(--fg); }
+
+  button.primary {
+    margin-top: 1.25rem;
+    width: 100%;
+    padding: 0.85rem 1rem;
+    border: 0;
+    border-radius: 10px;
     background: var(--accent);
     color: white;
-    font-size: 1rem;
-    font-weight: 500;
+    font-size: 0.95rem;
+    font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background 0.15s, transform 0.05s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
   }
-  button:hover:not(:disabled) { background: var(--accent-hover); }
-  button:disabled { background: #9ca3af; cursor: not-allowed; }
-  .status { margin-top: 1rem; font-size: 0.9rem; }
-  .status.error { color: var(--error); }
-  .status.ok { color: var(--ok); }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  button.primary:active:not(:disabled) { transform: translateY(1px); }
+  button.primary:disabled {
+    background: #cbd5e1;
+    cursor: not-allowed;
+  }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .status {
+    margin-top: 0.85rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    display: none;
+  }
+  .status.show { display: block; }
+  .status.error { background: var(--error-bg); color: var(--error); }
+  .status.ok { background: var(--ok-bg); color: var(--ok); }
+
   .help {
-    margin-top: 1.5rem;
+    margin-top: 1.75rem;
     padding-top: 1.5rem;
-    border-top: 1px solid #e5e7eb;
+    border-top: 1px solid var(--border);
     color: var(--muted);
-    font-size: 0.85rem;
-    line-height: 1.5;
+    font-size: 0.8125rem;
+    line-height: 1.55;
+  }
+  .help code {
+    background: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.95em;
+    color: var(--fg);
   }
 </style>
 </head>
 <body>
 <div class="card">
-  <h1>Bank Reconciliation Reformatter</h1>
-  <p class="subtitle">Upload the raw merchant-services Excel export. The app will add a formatted <code>Net Sales (2)</code> sheet and return the file.</p>
+  <div class="header">
+    <h1>Bank Reconciliation Reformatter</h1>
+    <p class="subtitle">Upload the raw merchant-services Excel export and download a copy with a formatted <code>Net Sales (2)</code> sheet.</p>
+  </div>
 
-  <label class="drop" id="drop">
-    <strong>Drop .xlsx file here</strong>
-    <span>or click to choose</span>
-    <input type="file" id="file" accept=".xlsx" />
+  <label class="drop" id="drop" for="file">
+    <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <span class="drop-title">Drop .xlsx file here</span>
+    <span class="drop-hint">or click to browse</span>
+    <input type="file" id="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
   </label>
 
-  <div class="filename" id="filename" style="display:none"></div>
-  <button id="submit" disabled>Reformat</button>
+  <div class="file-row" id="filerow">
+    <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+    </svg>
+    <span class="file-name" id="filename"></span>
+    <button class="file-clear" id="clear" type="button" title="Remove file" aria-label="Remove file">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <button class="primary" id="submit" disabled>
+    <span id="submit-label">Reformat</span>
+  </button>
+
   <div class="status" id="status"></div>
 
   <div class="help">
-    Aggregates rows in the <code>Net Sales</code> sheet by Site &amp; Product Code, sorts alphabetically, and adds a per-site subtotal (excluding Amex) on the last row of each group.
+    Aggregates rows in the <code>Net Sales</code> sheet by site &amp; product code, sorts alphabetically, and adds a per-site subtotal (excluding Amex) on the last row of each group.
   </div>
 </div>
 
 <script>
   const drop = document.getElementById("drop");
   const fileInput = document.getElementById("file");
-  const filenameEl = document.getElementById("filename");
+  const fileRow = document.getElementById("filerow");
+  const fileNameEl = document.getElementById("filename");
+  const clearBtn = document.getElementById("clear");
   const submitBtn = document.getElementById("submit");
+  const submitLabel = document.getElementById("submit-label");
   const statusEl = document.getElementById("status");
   let chosen = null;
+  let busy = false;
+
+  function showStatus(msg, kind) {
+    statusEl.textContent = msg;
+    statusEl.className = "status show " + (kind || "");
+  }
+  function clearStatus() {
+    statusEl.textContent = "";
+    statusEl.className = "status";
+  }
 
   function setFile(f) {
     chosen = f;
     if (f) {
-      filenameEl.textContent = f.name;
-      filenameEl.style.display = "block";
+      fileNameEl.textContent = f.name;
+      fileRow.classList.add("show");
+      drop.classList.add("has-file");
       submitBtn.disabled = false;
-      statusEl.textContent = "";
-      statusEl.className = "status";
+      clearStatus();
     } else {
-      filenameEl.style.display = "none";
+      fileRow.classList.remove("show");
+      drop.classList.remove("has-file");
       submitBtn.disabled = true;
+      fileInput.value = "";
     }
   }
 
@@ -136,7 +296,9 @@
     e.preventDefault();
     drop.classList.add("dragging");
   });
-  drop.addEventListener("dragleave", () => drop.classList.remove("dragging"));
+  drop.addEventListener("dragleave", (e) => {
+    if (e.target === drop) drop.classList.remove("dragging");
+  });
   drop.addEventListener("drop", (e) => {
     e.preventDefault();
     drop.classList.remove("dragging");
@@ -145,12 +307,20 @@
   fileInput.addEventListener("change", (e) => {
     if (e.target.files.length) setFile(e.target.files[0]);
   });
+  clearBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    setFile(null);
+  });
 
   submitBtn.addEventListener("click", async () => {
-    if (!chosen) return;
+    if (!chosen || busy) return;
+    busy = true;
     submitBtn.disabled = true;
-    statusEl.textContent = "Reformatting...";
-    statusEl.className = "status";
+    submitLabel.innerHTML = '<span class="spinner"></span> Reformatting...';
+    clearStatus();
+
     const form = new FormData();
     form.append("file", chosen);
     try {
@@ -169,15 +339,17 @@
       const a = document.createElement("a");
       a.href = url;
       a.download = name;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
       URL.revokeObjectURL(url);
-      statusEl.textContent = "Done. File downloaded.";
-      statusEl.className = "status ok";
+      showStatus("Done. Your formatted file has been downloaded.", "ok");
     } catch (err) {
-      statusEl.textContent = "Error: " + err.message;
-      statusEl.className = "status error";
+      showStatus("Error: " + err.message, "error");
     } finally {
-      submitBtn.disabled = false;
+      busy = false;
+      submitBtn.disabled = !chosen;
+      submitLabel.textContent = "Reformat";
     }
   });
 </script>
