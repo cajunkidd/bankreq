@@ -2,12 +2,16 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from .transform import reformat_workbook
 
 app = FastAPI(title="Bank Reconciliation Reformatter")
 
-INDEX_HTML = (Path(__file__).parent / "static" / "index.html").read_text()
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+INDEX_HTML = (STATIC_DIR / "index.html").read_text()
 
 XLSX_MIME = (
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

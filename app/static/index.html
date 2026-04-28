@@ -2,24 +2,37 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Bank Reconciliation Reformatter</title>
+<title>Stine — Bank Reconciliation</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg" />
 <style>
   :root {
+    /* Stine brand colors */
+    --stine-green: #008445;
+    --stine-green-dark: #006a37;
+    --stine-green-soft: #e6f4ec;
+    --stine-orange: #f16a2d;
+    --stine-orange-dark: #d65719;
+    --stine-orange-soft: #fdeee5;
+
     --fg: #0f172a;
     --muted: #64748b;
     --subtle: #94a3b8;
     --border: #e2e8f0;
     --border-strong: #cbd5e1;
-    --accent: #2563eb;
-    --accent-hover: #1d4ed8;
-    --accent-soft: #eff6ff;
-    --bg: #f1f5f9;
+    --bg-grad-top: #f6faf7;
+    --bg-grad-bottom: #e3ede6;
     --panel: #ffffff;
-    --error: #dc2626;
+    --error: #b91c1c;
     --error-bg: #fef2f2;
     --ok: #15803d;
     --ok-bg: #f0fdf4;
+
+    --accent: var(--stine-green);
+    --accent-hover: var(--stine-green-dark);
+    --accent-soft: var(--stine-green-soft);
+    --cta: var(--stine-orange);
+    --cta-hover: var(--stine-orange-dark);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -29,13 +42,30 @@
       Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 15px;
     line-height: 1.5;
-    background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+    background: linear-gradient(180deg, var(--bg-grad-top) 0%, var(--bg-grad-bottom) 100%);
     color: var(--fg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 2.5rem 1rem;
+    min-height: 100vh;
+  }
+
+  .brand {
+    width: 100%;
+    max-width: 520px;
+    margin-bottom: 1.5rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2rem 1rem;
   }
+  .brand img {
+    height: 56px;
+    width: auto;
+    display: block;
+  }
+
   .card {
     background: var(--panel);
     border-radius: 16px;
@@ -45,25 +75,38 @@
       0 10px 40px rgba(15, 23, 42, 0.08);
     width: 100%;
     max-width: 520px;
+    border-top: 4px solid var(--stine-green);
+    position: relative;
+    overflow: hidden;
   }
+  .card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--stine-green) 0%, var(--stine-green) 70%, var(--stine-orange) 70%, var(--stine-orange) 100%);
+  }
+
   .header { margin-bottom: 1.75rem; }
   h1 {
     margin: 0 0 0.4rem 0;
     font-size: 1.5rem;
-    font-weight: 600;
+    font-weight: 700;
     letter-spacing: -0.01em;
+    color: var(--stine-green);
   }
   .subtitle {
     margin: 0;
     color: var(--muted);
     font-size: 0.95rem;
   }
-  .subtitle code {
+  .subtitle code, .help code {
     background: #f1f5f9;
     padding: 1px 6px;
     border-radius: 4px;
     font-size: 0.85em;
     color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
 
   .drop {
@@ -79,20 +122,21 @@
     cursor: pointer;
     background: #fafbfc;
     transition: border-color 0.15s, background 0.15s, transform 0.1s;
+    position: relative;
   }
   .drop:hover {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    border-color: var(--stine-green);
+    background: var(--stine-green-soft);
   }
   .drop.dragging {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    border-color: var(--stine-green);
+    background: var(--stine-green-soft);
     transform: scale(1.01);
   }
   .drop.has-file {
     border-style: solid;
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    border-color: var(--stine-green);
+    background: var(--stine-green-soft);
   }
   .drop-icon {
     width: 44px;
@@ -102,7 +146,7 @@
   }
   .drop:hover .drop-icon,
   .drop.dragging .drop-icon,
-  .drop.has-file .drop-icon { color: var(--accent); }
+  .drop.has-file .drop-icon { color: var(--stine-green); }
   .drop-title {
     font-size: 1rem;
     font-weight: 600;
@@ -125,15 +169,15 @@
     gap: 0.75rem;
     margin-top: 1rem;
     padding: 0.75rem 1rem;
-    background: var(--accent-soft);
-    border: 1px solid #dbeafe;
+    background: var(--stine-green-soft);
+    border: 1px solid #c7e6d4;
     border-radius: 8px;
     font-size: 0.9rem;
   }
   .file-row.show { display: flex; }
   .file-row .file-icon {
     width: 18px; height: 18px;
-    color: var(--accent);
+    color: var(--stine-green);
     flex-shrink: 0;
   }
   .file-row .file-name {
@@ -153,7 +197,7 @@
     border-radius: 4px;
     flex-shrink: 0;
   }
-  .file-row .file-clear:hover { background: #dbeafe; color: var(--fg); }
+  .file-row .file-clear:hover { background: #c7e6d4; color: var(--fg); }
 
   button.primary {
     margin-top: 1.25rem;
@@ -161,22 +205,27 @@
     padding: 0.85rem 1rem;
     border: 0;
     border-radius: 10px;
-    background: var(--accent);
+    background: var(--cta);
     color: white;
     font-size: 0.95rem;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s, transform 0.05s;
+    transition: background 0.15s, transform 0.05s, box-shadow 0.15s;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+    box-shadow: 0 1px 2px rgba(241, 106, 45, 0.25);
   }
-  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  button.primary:hover:not(:disabled) {
+    background: var(--cta-hover);
+    box-shadow: 0 4px 10px rgba(241, 106, 45, 0.3);
+  }
   button.primary:active:not(:disabled) { transform: translateY(1px); }
   button.primary:disabled {
     background: #cbd5e1;
     cursor: not-allowed;
+    box-shadow: none;
   }
   .spinner {
     width: 16px; height: 16px;
@@ -206,20 +255,26 @@
     font-size: 0.8125rem;
     line-height: 1.55;
   }
-  .help code {
-    background: #f1f5f9;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 0.95em;
-    color: var(--fg);
+  .help strong { color: var(--fg); }
+
+  .footer {
+    margin-top: 1.5rem;
+    color: var(--subtle);
+    font-size: 0.75rem;
+    text-align: center;
   }
 </style>
 </head>
 <body>
+
+<div class="brand">
+  <img src="/static/logo.svg" alt="Stine" />
+</div>
+
 <div class="card">
   <div class="header">
-    <h1>Bank Reconciliation Reformatter</h1>
-    <p class="subtitle">Upload the raw merchant-services Excel export and download a copy with a formatted <code>Net Sales (2)</code> sheet.</p>
+    <h1>Bank Reconciliation</h1>
+    <p class="subtitle">Upload the raw merchant-services Excel export and download a copy with a formatted, branch-by-branch reconciliation sheet.</p>
   </div>
 
   <label class="drop" id="drop" for="file">
@@ -255,6 +310,8 @@
     <strong>Output file name:</strong> <code>BankReq - MM-DD-YYYY.xlsx</code>, where the date is the <em>Funded Date</em> from the data (e.g. <code>BankReq - 03-30-2026.xlsx</code>).
   </div>
 </div>
+
+<div class="footer">Stine &nbsp;·&nbsp; Accounts Payable Tools</div>
 
 <script>
   const drop = document.getElementById("drop");
