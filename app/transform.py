@@ -1,4 +1,5 @@
-from collections import defaultdict
+from collections import Counter, defaultdict
+from datetime import date, datetime
 from io import BytesIO
 
 from openpyxl import load_workbook
@@ -61,6 +62,7 @@ def _read_source_rows(wb: Workbook):
 
     aggregated: dict[tuple, float] = defaultdict(float)
     site_meta: dict[str, tuple[str, str]] = {}
+    date_counts: Counter = Counter()
     for row in ws.iter_rows(min_row=2, values_only=True):
         if row is None or all(v is None for v in row):
             continue
@@ -73,8 +75,11 @@ def _read_source_rows(wb: Workbook):
             continue
         aggregated[(alt_id, pc)] += float(amt)
         site_meta.setdefault(alt_id, (sname, fdate))
+        if fdate is not None:
+            date_counts[fdate] += 1
 
-    return aggregated, site_meta
+    funded_date = date_counts.most_common(1)[0][0] if date_counts else None
+    return aggregated, site_meta, funded_date
 
 
 def _next_sheet_name(wb: Workbook) -> str:
@@ -160,12 +165,29 @@ def _write_output_sheet(wb: Workbook, aggregated, site_meta) -> str:
     return name
 
 
-def reformat_workbook(file_bytes: bytes) -> tuple[bytes, str]:
+def _normalize_date(raw) -> date:
+    """Return a date object from the funded-date cell value, falling back to
+    today if it can't be parsed."""
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    if isinstance(raw, str):
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
+    return date.today()
+
+
+def reformat_workbook(file_bytes: bytes) -> tuple[bytes, str, date]:
     """Take a raw merchant-services workbook, append a 'Formatted' sheet
-    (auto-suffixed if one already exists), and return (workbook_bytes, sheet_name)."""
+    (auto-suffixed if one already exists), and return
+    (workbook_bytes, sheet_name, funded_date)."""
     wb = load_workbook(BytesIO(file_bytes))
-    aggregated, site_meta = _read_source_rows(wb)
+    aggregated, site_meta, raw_date = _read_source_rows(wb)
     sheet_name = _write_output_sheet(wb, aggregated, site_meta)
     out = BytesIO()
     wb.save(out)
-    return out.getvalue(), sheet_name
+    return out.getvalue(), sheet_name, _normalize_date(raw_date)

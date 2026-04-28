@@ -1,4 +1,3 @@
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -26,13 +25,12 @@ async def reformat(file: UploadFile = File(...)) -> Response:
         raise HTTPException(400, "Please upload an .xlsx file.")
     raw = await file.read()
     try:
-        out_bytes, _sheet_name = reformat_workbook(raw)
+        out_bytes, _sheet_name, funded_date = reformat_workbook(raw)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    stem = Path(file.filename).stem
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_name = f"{stem} - formatted - {stamp}.xlsx"
+    # MM-DD-YYYY (dashes — slashes aren't allowed in Windows filenames).
+    out_name = f"BankReq - {funded_date.strftime('%m-%d-%Y')}.xlsx"
     return Response(
         content=out_bytes,
         media_type=XLSX_MIME,
