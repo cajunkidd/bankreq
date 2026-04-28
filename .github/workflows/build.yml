@@ -1,0 +1,54 @@
+name: Build Windows executable
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller --clean bankreq.spec
+
+      - name: Smoke-test the executable
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "dist/bankreq.exe" -PassThru
+          Start-Sleep -Seconds 6
+          try {
+            $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8000/" -TimeoutSec 5
+            if ($r.StatusCode -ne 200) { throw "Bad status: $($r.StatusCode)" }
+            Write-Host "Smoke test passed."
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bankreq-windows
+          path: dist/bankreq.exe
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/bankreq.exe
+          generate_release_notes: true

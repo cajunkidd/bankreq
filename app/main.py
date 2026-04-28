@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -8,7 +9,15 @@ from .transform import reformat_workbook
 
 app = FastAPI(title="Bank Reconciliation Reformatter")
 
-STATIC_DIR = Path(__file__).parent / "static"
+
+def _static_dir() -> Path:
+    # When frozen by PyInstaller, data files are extracted into _MEIPASS.
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "app" / "static"
+    return Path(__file__).parent / "static"
+
+
+STATIC_DIR = _static_dir()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 INDEX_HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
