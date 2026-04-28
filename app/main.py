@@ -26,7 +26,7 @@ async def reformat(file: UploadFile = File(...)) -> Response:
         raise HTTPException(400, "Please upload an .xlsx file.")
     raw = await file.read()
     try:
-        out_bytes = reformat_workbook(raw)
+        out_bytes, _sheet_name = reformat_workbook(raw)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
