@@ -5,7 +5,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import news, weather
+from . import lumber, news, weather
 from .transform import reformat_workbook
 
 app = FastAPI(title="Bank Reconciliation Reformatter")
@@ -45,6 +45,14 @@ def api_weather() -> JSONResponse:
 def api_news() -> JSONResponse:
     items = news.get_headlines()
     return JSONResponse({"items": items})
+
+
+@app.get("/api/lumber")
+def api_lumber() -> JSONResponse:
+    q = lumber.get_quote()
+    if q is None:
+        return JSONResponse({"available": False})
+    return JSONResponse({"available": True, **q})
 
 
 @app.post("/reformat")

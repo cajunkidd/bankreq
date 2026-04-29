@@ -323,6 +323,45 @@
   .wx-temp { font-size: 1.25rem; font-weight: 700; color: var(--fg); line-height: 1.1; }
   .wx-short { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.3; }
 
+  /* Lumber ticker */
+  .left-stack { display: flex; flex-direction: column; gap: 1.5rem; }
+  .lumber {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .lumber-info {
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .lumber-symbol {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .lumber-price {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--fg);
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+  }
+  .lumber-change {
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-top: 0.15rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .lumber-change.up   { color: #15803d; }
+  .lumber-change.down { color: #b91c1c; }
+  .lumber-change.flat { color: var(--muted); }
+  .lumber-spark {
+    width: 90px; height: 36px;
+    flex-shrink: 0;
+  }
+
   /* News */
   .news-list { list-style: none; padding: 0; margin: 0; }
   .news-list li { padding: 0.55rem 0; border-bottom: 1px solid var(--border); }
@@ -352,10 +391,16 @@
 </div>
 
 <div class="layout">
-  <section class="panel-card" id="weather-card">
-    <h2><span class="dot"></span> Sulphur, LA forecast</h2>
-    <div id="weather-body"><div class="panel-empty">Loading forecast&hellip;</div></div>
-  </section>
+  <div class="left-stack">
+    <section class="panel-card" id="weather-card">
+      <h2><span class="dot"></span> Sulphur, LA forecast</h2>
+      <div id="weather-body"><div class="panel-empty">Loading forecast&hellip;</div></div>
+    </section>
+    <section class="panel-card" id="lumber-card">
+      <h2><span class="dot"></span> Lumber futures</h2>
+      <div id="lumber-body"><div class="panel-empty">Loading quote&hellip;</div></div>
+    </section>
+  </div>
 
   <div class="card">
     <div class="header">
@@ -509,8 +554,53 @@
       body.innerHTML = '<div class="panel-empty">Headlines temporarily unavailable.</div>';
     }
   }
+  function buildSparkline(values, width = 90, height = 36) {
+    if (!values || values.length < 2) return "";
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const stepX = width / (values.length - 1);
+    const pts = values.map((v, i) => {
+      const x = (i * stepX).toFixed(2);
+      const y = (height - ((v - min) / range) * height).toFixed(2);
+      return `${x},${y}`;
+    }).join(" ");
+    const last = values[values.length - 1];
+    const first = values[0];
+    const stroke = last >= first ? "#15803d" : "#b91c1c";
+    return `<svg class="lumber-spark" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+      <polyline fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" points="${pts}"/>
+    </svg>`;
+  }
+  async function loadLumber() {
+    const body = document.getElementById("lumber-body");
+    try {
+      const r = await fetch("/api/lumber");
+      const j = await r.json();
+      if (!j.available) {
+        body.innerHTML = '<div class="panel-empty">Quote temporarily unavailable.</div>';
+        return;
+      }
+      const dir = j.change > 0 ? "up" : j.change < 0 ? "down" : "flat";
+      const arrow = j.change > 0 ? "▲" : j.change < 0 ? "▼" : "—";
+      const sign = j.change >= 0 ? "+" : "";
+      const fmt = (n) => Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      body.innerHTML = `
+        <div class="lumber">
+          <div class="lumber-info">
+            <span class="lumber-symbol">${escapeHtml(j.symbol)} &middot; ${escapeHtml(j.currency)}</span>
+            <span class="lumber-price">$${fmt(j.price)}</span>
+            <span class="lumber-change ${dir}">${arrow} ${sign}${fmt(j.change)} (${sign}${fmt(j.percent)}%)</span>
+          </div>
+          ${buildSparkline(j.sparkline)}
+        </div>`;
+    } catch {
+      body.innerHTML = '<div class="panel-empty">Quote temporarily unavailable.</div>';
+    }
+  }
   loadWeather();
   loadNews();
+  loadLumber();
 
   submitBtn.addEventListener("click", async () => {
     if (!chosen || busy) return;
