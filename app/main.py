@@ -2,9 +2,10 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from . import news, weather
 from .transform import reformat_workbook
 
 app = FastAPI(title="Bank Reconciliation Reformatter")
@@ -30,6 +31,20 @@ XLSX_MIME = (
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return INDEX_HTML
+
+
+@app.get("/api/weather")
+def api_weather() -> JSONResponse:
+    data = weather.get_forecast()
+    if data is None:
+        return JSONResponse({"available": False}, status_code=200)
+    return JSONResponse({"available": True, **data})
+
+
+@app.get("/api/news")
+def api_news() -> JSONResponse:
+    items = news.get_headlines()
+    return JSONResponse({"items": items})
 
 
 @app.post("/reformat")

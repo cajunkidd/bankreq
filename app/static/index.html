@@ -255,6 +255,86 @@
     text-align: center;
     letter-spacing: 0.01em;
   }
+
+  /* ---------- Weather + News panel ---------- */
+  .panel {
+    width: 100%;
+    max-width: 980px;
+    margin-top: 2rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+    gap: 1.25rem;
+  }
+  @media (max-width: 760px) {
+    .panel { grid-template-columns: 1fr; }
+  }
+  .panel-card {
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 1.25rem 1.4rem;
+    box-shadow:
+      0 1px 3px rgba(15, 23, 42, 0.04),
+      0 6px 18px rgba(15, 23, 42, 0.05);
+  }
+  .panel-card h2 {
+    margin: 0 0 0.85rem 0;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--stine-green);
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .panel-card h2 .dot {
+    width: 8px; height: 8px;
+    background: var(--stine-orange);
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .panel-empty {
+    color: var(--muted);
+    font-size: 0.875rem;
+    font-style: italic;
+  }
+
+  /* Weather */
+  .wx-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+  }
+  .wx-period {
+    background: #f8fafc;
+    border-radius: 8px;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid var(--border);
+  }
+  .wx-name { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.15rem; }
+  .wx-temp { font-size: 1.4rem; font-weight: 700; color: var(--fg); line-height: 1.1; }
+  .wx-short { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.3; }
+
+  /* News */
+  .news-list { list-style: none; padding: 0; margin: 0; }
+  .news-list li { padding: 0.55rem 0; border-bottom: 1px solid var(--border); }
+  .news-list li:last-child { border-bottom: 0; }
+  .news-list a {
+    color: var(--fg);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    display: block;
+  }
+  .news-list a:hover { color: var(--stine-green); text-decoration: underline; }
+  .news-source {
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.15rem;
+  }
 </style>
 </head>
 <body>
@@ -301,6 +381,17 @@
     Aggregates rows in the <code>Net Sales</code> sheet by site &amp; product code, sorts alphabetically, and adds a per-site subtotal (excluding Amex) on the last row of each group.<br><br>
     <strong>Output file name:</strong> <code>BankReq - MM-DD-YYYY.xlsx</code>, where the date is the <em>Funded Date</em> from the data (e.g. <code>BankReq - 03-30-2026.xlsx</code>).
   </div>
+</div>
+
+<div class="panel">
+  <section class="panel-card" id="weather-card">
+    <h2><span class="dot"></span> Sulphur, LA forecast</h2>
+    <div id="weather-body"><div class="panel-empty">Loading forecast&hellip;</div></div>
+  </section>
+  <section class="panel-card" id="news-card">
+    <h2><span class="dot"></span> LBM industry news</h2>
+    <div id="news-body"><div class="panel-empty">Loading headlines&hellip;</div></div>
+  </section>
 </div>
 
 <div class="footer">Created by Stine IT&trade;</div>
@@ -363,6 +454,54 @@
     if (busy) return;
     setFile(null);
   });
+
+  // ---- Weather + News panel ----
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+  async function loadWeather() {
+    const body = document.getElementById("weather-body");
+    try {
+      const r = await fetch("/api/weather");
+      const j = await r.json();
+      if (!j.available || !j.periods || !j.periods.length) {
+        body.innerHTML = '<div class="panel-empty">Forecast temporarily unavailable.</div>';
+        return;
+      }
+      const cards = j.periods.map((p) => `
+        <div class="wx-period">
+          <div class="wx-name">${escapeHtml(p.name || "")}</div>
+          <div class="wx-temp">${p.temp ?? "--"}&deg;${escapeHtml(p.unit || "F")}</div>
+          <div class="wx-short">${escapeHtml(p.short || "")}</div>
+        </div>`).join("");
+      body.innerHTML = `<div class="wx-row">${cards}</div>`;
+    } catch {
+      body.innerHTML = '<div class="panel-empty">Forecast temporarily unavailable.</div>';
+    }
+  }
+  async function loadNews() {
+    const body = document.getElementById("news-body");
+    try {
+      const r = await fetch("/api/news");
+      const j = await r.json();
+      if (!j.items || !j.items.length) {
+        body.innerHTML = '<div class="panel-empty">No headlines available right now.</div>';
+        return;
+      }
+      const lis = j.items.map((n) => `
+        <li>
+          <a href="${escapeHtml(n.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(n.title)}</a>
+          <div class="news-source">${escapeHtml(n.source)}</div>
+        </li>`).join("");
+      body.innerHTML = `<ul class="news-list">${lis}</ul>`;
+    } catch {
+      body.innerHTML = '<div class="panel-empty">Headlines temporarily unavailable.</div>';
+    }
+  }
+  loadWeather();
+  loadNews();
 
   submitBtn.addEventListener("click", async () => {
     if (!chosen || busy) return;
