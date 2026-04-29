@@ -256,18 +256,26 @@
     letter-spacing: 0.01em;
   }
 
-  /* ---------- Weather + News panel ---------- */
-  .panel {
+  /* ---------- 3-column layout: weather | upload | news ---------- */
+  .layout {
     width: 100%;
-    max-width: 980px;
-    margin-top: 2rem;
+    max-width: 1200px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
-    gap: 1.25rem;
+    grid-template-columns: 280px minmax(0, 520px) 320px;
+    gap: 1.5rem;
+    align-items: start;
+    justify-content: center;
   }
-  @media (max-width: 760px) {
-    .panel { grid-template-columns: 1fr; }
+  @media (max-width: 1100px) {
+    .layout {
+      grid-template-columns: minmax(0, 520px);
+    }
+    .layout .card { order: 1; }
+    .layout #weather-card { order: 2; }
+    .layout #news-card { order: 3; }
   }
+
+  /* ---------- Weather + News panel ---------- */
   .panel-card {
     background: var(--panel);
     border-radius: 12px;
@@ -278,7 +286,7 @@
   }
   .panel-card h2 {
     margin: 0 0 0.85rem 0;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--stine-green);
@@ -295,7 +303,7 @@
   }
   .panel-empty {
     color: var(--muted);
-    font-size: 0.875rem;
+    font-size: 0.85rem;
     font-style: italic;
   }
 
@@ -303,17 +311,17 @@
   .wx-row {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.6rem;
+    gap: 0.55rem;
   }
   .wx-period {
     background: #f8fafc;
     border-radius: 8px;
-    padding: 0.75rem 0.85rem;
+    padding: 0.65rem 0.7rem;
     border: 1px solid var(--border);
   }
-  .wx-name { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.15rem; }
-  .wx-temp { font-size: 1.4rem; font-weight: 700; color: var(--fg); line-height: 1.1; }
-  .wx-short { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.3; }
+  .wx-name { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.15rem; }
+  .wx-temp { font-size: 1.25rem; font-weight: 700; color: var(--fg); line-height: 1.1; }
+  .wx-short { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.3; }
 
   /* News */
   .news-list { list-style: none; padding: 0; margin: 0; }
@@ -323,14 +331,14 @@
     color: var(--fg);
     text-decoration: none;
     font-weight: 500;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     line-height: 1.35;
     display: block;
   }
   .news-list a:hover { color: var(--stine-green); text-decoration: underline; }
   .news-source {
     color: var(--muted);
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-top: 0.15rem;
@@ -343,51 +351,52 @@
   <img src="/static/logo.svg" alt="Stine" />
 </div>
 
-<div class="card">
-  <div class="header">
-    <h1>Bank Reconciliation</h1>
-    <p class="subtitle">Upload the CardConnect Excel report to auto-format.</p>
-  </div>
-
-  <label class="drop" id="drop" for="file">
-    <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="17 8 12 3 7 8"/>
-      <line x1="12" y1="3" x2="12" y2="15"/>
-    </svg>
-    <span class="drop-title">Drop .xlsx file here</span>
-    <span class="drop-hint">or click to browse</span>
-    <input type="file" id="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-  </label>
-
-  <div class="file-row" id="filerow">
-    <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-      <polyline points="14 2 14 8 20 8"/>
-    </svg>
-    <span class="file-name" id="filename"></span>
-    <button class="file-clear" id="clear" type="button" title="Remove file" aria-label="Remove file">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-    </button>
-  </div>
-
-  <button class="primary" id="submit" disabled>
-    <span id="submit-label">Reformat</span>
-  </button>
-
-  <div class="status" id="status"></div>
-
-  <div class="help">
-    Aggregates rows in the <code>Net Sales</code> sheet by site &amp; product code, sorts alphabetically, and adds a per-site subtotal (excluding Amex) on the last row of each group.<br><br>
-    <strong>Output file name:</strong> <code>BankReq - MM-DD-YYYY.xlsx</code>, where the date is the <em>Funded Date</em> from the data (e.g. <code>BankReq - 03-30-2026.xlsx</code>).
-  </div>
-</div>
-
-<div class="panel">
+<div class="layout">
   <section class="panel-card" id="weather-card">
     <h2><span class="dot"></span> Sulphur, LA forecast</h2>
     <div id="weather-body"><div class="panel-empty">Loading forecast&hellip;</div></div>
   </section>
+
+  <div class="card">
+    <div class="header">
+      <h1>Bank Reconciliation</h1>
+      <p class="subtitle">Upload the CardConnect Excel report to auto-format.</p>
+    </div>
+
+    <label class="drop" id="drop" for="file">
+      <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <span class="drop-title">Drop .xlsx file here</span>
+      <span class="drop-hint">or click to browse</span>
+      <input type="file" id="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+    </label>
+
+    <div class="file-row" id="filerow">
+      <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      <span class="file-name" id="filename"></span>
+      <button class="file-clear" id="clear" type="button" title="Remove file" aria-label="Remove file">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <button class="primary" id="submit" disabled>
+      <span id="submit-label">Reformat</span>
+    </button>
+
+    <div class="status" id="status"></div>
+
+    <div class="help">
+      Aggregates rows in the <code>Net Sales</code> sheet by site &amp; product code, sorts alphabetically, and adds a per-site subtotal (excluding Amex) on the last row of each group.<br><br>
+      <strong>Output file name:</strong> <code>BankReq - MM-DD-YYYY.xlsx</code>, where the date is the <em>Funded Date</em> from the data (e.g. <code>BankReq - 03-30-2026.xlsx</code>).
+    </div>
+  </div>
+
   <section class="panel-card" id="news-card">
     <h2><span class="dot"></span> LBM industry news</h2>
     <div id="news-body"><div class="panel-empty">Loading headlines&hellip;</div></div>
