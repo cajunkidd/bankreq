@@ -38,7 +38,7 @@ async def reformat(file: UploadFile = File(...)) -> Response:
         raise HTTPException(400, "Please upload an .xlsx file.")
     raw = await file.read()
     try:
-        out_bytes, _sheet_name, funded_date = reformat_workbook(raw)
+        out_bytes, _sheet_name, funded_date, anomaly_count = reformat_workbook(raw)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -47,5 +47,9 @@ async def reformat(file: UploadFile = File(...)) -> Response:
     return Response(
         content=out_bytes,
         media_type=XLSX_MIME,
-        headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{out_name}"',
+            "X-Anomaly-Count": str(anomaly_count),
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Anomaly-Count",
+        },
     )

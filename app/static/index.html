@@ -385,6 +385,7 @@
       const cd = res.headers.get("Content-Disposition") || "";
       const m = cd.match(/filename="([^"]+)"/);
       const name = m ? m[1] : "formatted.xlsx";
+      const anomalies = parseInt(res.headers.get("X-Anomaly-Count") || "0", 10);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -393,7 +394,11 @@
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      showStatus("Done. Your formatted file has been downloaded.", "ok");
+      let msg = "Done. Your formatted file has been downloaded.";
+      if (anomalies > 0) {
+        msg += ` ${anomalies} cell${anomalies === 1 ? "" : "s"} flagged as anomalous (highlighted in orange in the file).`;
+      }
+      showStatus(msg, "ok");
     } catch (err) {
       showStatus("Error: " + err.message, "error");
     } finally {

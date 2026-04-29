@@ -3,8 +3,11 @@ from datetime import date, datetime
 from io import BytesIO
 
 from openpyxl import load_workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.workbook import Workbook
+
+from . import history
 
 SOURCE_SHEET = "Net Sales"
 ADDITIONAL_SOURCE_SHEETS = ("Adjustments", "Chargebacks & Chargeback Revers")
@@ -20,6 +23,12 @@ OUTPUT_HEADERS = [
 ]
 
 AMOUNT_FORMAT = "#,###.00;\\-#,###.00"
+
+# Anomaly highlight: light orange fill, matches the Stine accent palette.
+ANOMALY_FILL = PatternFill(
+    fill_type="solid", start_color="FDEEE5", end_color="FDEEE5"
+)
+ANOMALY_K = 2.0  # how many stddevs out is "anomalous"
 
 COLUMN_WIDTHS = {
     "A": 13.0,
@@ -141,7 +150,34 @@ def _draw_box(ws, top_row: int, bottom_row: int) -> None:
             )
 
 
-def _write_net_sales_section(ws, aggregated, site_meta, start_row: int) -> int:
+def _flag_anomaly(amt_cell, alt_id, pc, source_sheet, amount, asof) -> bool:
+    """Apply an anomaly highlight to amt_cell if `amount` is an outlier
+    compared to history for (alt_id, pc, source_sheet) before `asof`.
+    Returns True when a flag was applied."""
+    if asof is None:
+        return False
+    bl = history.baseline(alt_id, pc, source_sheet, asof)
+    if bl is None:
+        return False
+    lo, hi = bl.lower(ANOMALY_K), bl.upper(ANOMALY_K)
+    if lo <= amount <= hi:
+        return False
+    amt_cell.fill = ANOMALY_FILL
+    direction = "above" if amount > hi else "below"
+    amt_cell.comment = Comment(
+        (
+            f"Anomaly: {amount:,.2f} is {direction} the typical range.\n"
+            f"Last {bl.n} day(s): mean={bl.mean:,.2f}, "
+            f"normal range={lo:,.2f} – {hi:,.2f}."
+        ),
+        "Bank Reformatter",
+    )
+    return True
+
+
+def _write_net_sales_section(
+    ws, aggregated, site_meta, start_row: int, asof, anomaly_counter
+) -> int:
     """Write the per-site Net Sales boxes. Returns the next free row."""
     sites = sorted(site_meta.keys(), key=lambda s: str(s))
     current_row = start_row
@@ -163,6 +199,8 @@ def _write_net_sales_section(ws, aggregated, site_meta, start_row: int) -> int:
             ws.cell(row=current_row, column=4, value=pc)
             amt_cell = ws.cell(row=current_row, column=5, value=amt)
             amt_cell.number_format = AMOUNT_FORMAT
+            if _flag_anomaly(amt_cell, alt_id, pc, SOURCE_SHEET, amt, asof):
+                anomaly_counter[0] += 1
             if pc != "Amex" and first_non_amex_row is None:
                 first_non_amex_row = current_row
             current_row += 1
@@ -180,11 +218,11 @@ def _write_net_sales_section(ws, aggregated, site_meta, start_row: int) -> int:
 
 
 def _write_aux_section(
-    ws, label: str, agg: dict, site_meta: dict, start_row: int
+    ws, label: str, agg: dict, site_meta: dict, start_row: int,
+    asof, anomaly_counter,
 ) -> int:
     """Write a labeled, boxed section for an auxiliary data source
     (Adjustments, Chargebacks). Returns the next free row."""
-    # Section label row spanning A:F
     label_row = start_row
     ws.merge_cells(
         start_row=label_row, start_column=1, end_row=label_row, end_column=6
@@ -207,26 +245,23 @@ def _write_aux_section(
         ws.cell(row=current_row, column=4, value=pc)
         amt_cell = ws.cell(row=current_row, column=5, value=amt)
         amt_cell.number_format = AMOUNT_FORMAT
+        if _flag_anomaly(amt_cell, alt_id, pc, label, amt, asof):
+            anomaly_counter[0] += 1
         current_row += 1
 
     data_last = current_row - 1
     if data_last >= data_start:
-        # Total in column F on the last row of the section.
         total_cell = ws.cell(row=data_last, column=6)
         total_cell.value = f"=SUM(E{data_start}:E{data_last})"
         total_cell.number_format = AMOUNT_FORMAT
-        # Box the section, label row included.
         _draw_box(ws, label_row, data_last)
     else:
-        # Section had no data rows somehow — still box the label so it
-        # doesn't dangle. (Shouldn't normally hit this path because we
-        # only write a section when agg is non-empty.)
         _draw_box(ws, label_row, label_row)
 
     return current_row
 
 
-def _write_output_sheet(wb: Workbook, sources, site_meta) -> str:
+def _write_output_sheet(wb: Workbook, sources, site_meta, asof) -> tuple[str, int]:
     name = _next_sheet_name(wb)
     ws = wb.create_sheet(name, 0)
     wb.active = 0
@@ -242,8 +277,10 @@ def _write_output_sheet(wb: Workbook, sources, site_meta) -> str:
     for letter, width in COLUMN_WIDTHS.items():
         ws.column_dimensions[letter].width = width
 
+    anomaly_counter = [0]
     next_row = _write_net_sales_section(
-        ws, sources.get(SOURCE_SHEET, {}), site_meta, start_row=2
+        ws, sources.get(SOURCE_SHEET, {}), site_meta,
+        start_row=2, asof=asof, anomaly_counter=anomaly_counter,
     )
 
     for sheet_name in ADDITIONAL_SOURCE_SHEETS:
@@ -252,10 +289,11 @@ def _write_output_sheet(wb: Workbook, sources, site_meta) -> str:
             continue
         next_row += 1  # blank separator row
         next_row = _write_aux_section(
-            ws, sheet_name, agg, site_meta, start_row=next_row
+            ws, sheet_name, agg, site_meta,
+            start_row=next_row, asof=asof, anomaly_counter=anomaly_counter,
         )
 
-    return name
+    return name, anomaly_counter[0]
 
 
 def _normalize_date(raw) -> date:
@@ -274,13 +312,29 @@ def _normalize_date(raw) -> date:
     return date.today()
 
 
-def reformat_workbook(file_bytes: bytes) -> tuple[bytes, str, date]:
+def reformat_workbook(file_bytes: bytes) -> tuple[bytes, str, date, int]:
     """Take a raw merchant-services workbook, append a 'Formatted' sheet
     (auto-suffixed if one already exists), and return
-    (workbook_bytes, sheet_name, funded_date)."""
+    (workbook_bytes, sheet_name, funded_date, anomaly_count).
+
+    Anomaly highlighting compares each (site, product, source) cell to
+    the trailing 60-day baseline persisted in the local history DB. The
+    current upload is recorded after we render, so its values become
+    part of the baseline for *future* uploads."""
     wb = load_workbook(BytesIO(file_bytes))
     sources, site_meta, raw_date = _read_source_rows(wb)
-    sheet_name = _write_output_sheet(wb, sources, site_meta)
+    funded_date = _normalize_date(raw_date)
+    sheet_name, anomaly_count = _write_output_sheet(
+        wb, sources, site_meta, asof=funded_date
+    )
+    # Persist this upload to history so future runs have a baseline.
+    history_rows = []
+    for source_name, agg in sources.items():
+        for (alt_id, pc), amt in agg.items():
+            sname = site_meta.get(alt_id, (None, None))[0]
+            history_rows.append((alt_id, sname, pc, source_name, amt))
+    history.record_upload(history_rows, funded_date=funded_date)
+
     out = BytesIO()
     wb.save(out)
-    return out.getvalue(), sheet_name, _normalize_date(raw_date)
+    return out.getvalue(), sheet_name, funded_date, anomaly_count
