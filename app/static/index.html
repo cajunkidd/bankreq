@@ -323,8 +323,9 @@
   .wx-temp { font-size: 1.25rem; font-weight: 700; color: var(--fg); line-height: 1.1; }
   .wx-short { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.3; }
 
+  /* Stacked side columns */
+  .left-stack, .right-stack { display: flex; flex-direction: column; gap: 1.5rem; }
   /* Lumber ticker */
-  .left-stack { display: flex; flex-direction: column; gap: 1.5rem; }
   .lumber {
     display: flex;
     align-items: center;
@@ -382,6 +383,74 @@
     letter-spacing: 0.05em;
     margin-top: 0.15rem;
   }
+
+  /* Interest rates */
+  .rates-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .rates-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.4rem 0.6rem;
+    background: #f8fafc;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  .rates-label { font-size: 0.8rem; color: var(--muted); font-weight: 500; }
+  .rates-yield { font-size: 1rem; font-weight: 700; color: var(--fg); }
+  .rates-change { font-size: 0.75rem; font-weight: 600; }
+  .rates-change.up   { color: #15803d; }
+  .rates-change.down { color: #b91c1c; }
+  .rates-change.flat { color: var(--muted); }
+
+  /* Recent uploads */
+  .recent-list { list-style: none; padding: 0; margin: 0; }
+  .recent-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .recent-row:last-child { border-bottom: 0; }
+  .recent-info { flex: 1; min-width: 0; }
+  .recent-name {
+    font-size: 0.85rem;
+    color: var(--fg);
+    font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .recent-meta {
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.1rem;
+  }
+  .recent-meta .anomaly-pill {
+    display: inline-block;
+    background: var(--stine-orange-soft);
+    color: var(--stine-orange-dark);
+    border-radius: 3px;
+    padding: 0 5px;
+    margin-left: 0.4rem;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .recent-dl {
+    border: 0;
+    background: var(--stine-green);
+    color: white;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .recent-dl:hover { background: var(--stine-green-dark); }
 </style>
 </head>
 <body>
@@ -442,10 +511,20 @@
     </div>
   </div>
 
-  <section class="panel-card" id="news-card">
-    <h2><span class="dot"></span> LBM industry news</h2>
-    <div id="news-body"><div class="panel-empty">Loading headlines&hellip;</div></div>
-  </section>
+  <div class="right-stack">
+    <section class="panel-card" id="news-card">
+      <h2><span class="dot"></span> LBM industry news</h2>
+      <div id="news-body"><div class="panel-empty">Loading headlines&hellip;</div></div>
+    </section>
+    <section class="panel-card" id="rates-card">
+      <h2><span class="dot"></span> Interest rates</h2>
+      <div id="rates-body"><div class="panel-empty">Loading rates&hellip;</div></div>
+    </section>
+    <section class="panel-card" id="recent-card">
+      <h2><span class="dot"></span> Recent uploads</h2>
+      <div id="recent-body"><div class="panel-empty">No recent uploads yet.</div></div>
+    </section>
+  </div>
 </div>
 
 <div class="footer">Created by Stine IT&trade;</div>
@@ -598,9 +677,96 @@
       body.innerHTML = '<div class="panel-empty">Quote temporarily unavailable.</div>';
     }
   }
+  async function loadRates() {
+    const body = document.getElementById("rates-body");
+    try {
+      const r = await fetch("/api/rates");
+      const j = await r.json();
+      if (!j.items || !j.items.length) {
+        body.innerHTML = '<div class="panel-empty">Rates temporarily unavailable.</div>';
+        return;
+      }
+      const rows = j.items.map((it) => {
+        const dir = it.change_bps > 0 ? "up" : it.change_bps < 0 ? "down" : "flat";
+        const arrow = it.change_bps > 0 ? "▲" : it.change_bps < 0 ? "▼" : "—";
+        const sign = it.change_bps >= 0 ? "+" : "";
+        return `<div class="rates-row">
+          <span class="rates-label">${escapeHtml(it.label)}</span>
+          <span class="rates-yield">${it.yield.toFixed(2)}%</span>
+          <span class="rates-change ${dir}">${arrow} ${sign}${it.change_bps.toFixed(1)} bps</span>
+        </div>`;
+      }).join("");
+      body.innerHTML = `<div class="rates-list">${rows}</div>`;
+    } catch {
+      body.innerHTML = '<div class="panel-empty">Rates temporarily unavailable.</div>';
+    }
+  }
+
+  function fmtRelative(iso) {
+    if (!iso) return "";
+    const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+    if (isNaN(d)) return iso;
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 7 * 86400) return `${Math.floor(diff / 86400)}d ago`;
+    return d.toLocaleDateString();
+  }
+
+  async function loadRecentUploads() {
+    const body = document.getElementById("recent-body");
+    try {
+      const r = await fetch("/api/uploads");
+      const j = await r.json();
+      if (!j.items || !j.items.length) {
+        body.innerHTML = '<div class="panel-empty">No recent uploads yet. Run one to see it here.</div>';
+        return;
+      }
+      const rows = j.items.map((it) => {
+        const pill = it.anomaly_count > 0
+          ? `<span class="anomaly-pill">${it.anomaly_count} anomaly${it.anomaly_count === 1 ? "" : "ies"}</span>`
+          : "";
+        return `<li class="recent-row">
+          <div class="recent-info">
+            <div class="recent-name">${escapeHtml(it.filename)}</div>
+            <div class="recent-meta">${escapeHtml(fmtRelative(it.created_at))}${pill}</div>
+          </div>
+          <button class="recent-dl" data-id="${it.id}" data-name="${escapeHtml(it.filename)}">Download</button>
+        </li>`;
+      }).join("");
+      body.innerHTML = `<ul class="recent-list">${rows}</ul>`;
+      body.querySelectorAll(".recent-dl").forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          const id = ev.currentTarget.dataset.id;
+          const name = ev.currentTarget.dataset.name;
+          try {
+            const dl = await fetch(`/api/uploads/${id}/download`);
+            if (!dl.ok) throw new Error("Download failed");
+            const blob = await dl.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+          } catch (e) {
+            alert("Could not download: " + e.message);
+          }
+        });
+      });
+    } catch {
+      body.innerHTML = '<div class="panel-empty">Recent uploads unavailable.</div>';
+    }
+  }
+
   loadWeather();
   loadNews();
   loadLumber();
+  loadRates();
+  loadRecentUploads();
 
   submitBtn.addEventListener("click", async () => {
     if (!chosen || busy) return;
@@ -637,6 +803,8 @@
         msg += ` ${anomalies} cell${anomalies === 1 ? "" : "s"} flagged as anomalous (highlighted in orange in the file).`;
       }
       showStatus(msg, "ok");
+      // Refresh the Recent Uploads card so the new entry appears.
+      loadRecentUploads();
     } catch (err) {
       showStatus("Error: " + err.message, "error");
     } finally {

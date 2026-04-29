@@ -63,6 +63,19 @@ def init_db() -> None:
                 ON uploads (site_alternate_id, product_code, source_sheet, funded_date)
             """
         )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS formatted_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                funded_date TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                anomaly_count INTEGER NOT NULL DEFAULT 0,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
 
 
 def record_upload(
@@ -101,6 +114,90 @@ class Baseline:
 
     def upper(self, k: float = 2.0) -> float:
         return self.mean + k * self.stdev
+
+
+def _files_dir() -> Path:
+    p = data_dir() / "files"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def record_formatted_file(
+    file_bytes: bytes,
+    filename: str,
+    funded_date: date,
+    anomaly_count: int,
+    keep_days: int = 30,
+) -> int:
+    """Save the generated workbook to disk and record it in the DB.
+    Returns the row id. Old files (>keep_days) are pruned in the same
+    transaction."""
+    init_db()
+    cutoff = (date.today() - timedelta(days=keep_days)).isoformat()
+
+    with _conn() as con:
+        # Insert first to get an autoincrement id, then write the bytes
+        # to a file named after that id.
+        cur = con.execute(
+            """
+            INSERT INTO formatted_files
+              (funded_date, filename, file_path, anomaly_count, size_bytes)
+            VALUES (?, ?, '', ?, ?)
+            """,
+            (funded_date.isoformat(), filename, anomaly_count, len(file_bytes)),
+        )
+        row_id = cur.lastrowid
+        path = _files_dir() / f"{row_id}.xlsx"
+        path.write_bytes(file_bytes)
+        con.execute(
+            "UPDATE formatted_files SET file_path = ? WHERE id = ?",
+            (str(path), row_id),
+        )
+
+        # Prune old rows + their files.
+        old = con.execute(
+            "SELECT id, file_path FROM formatted_files WHERE created_at < ?",
+            (cutoff,),
+        ).fetchall()
+        for r in old:
+            try:
+                Path(r["file_path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+        con.execute(
+            "DELETE FROM formatted_files WHERE created_at < ?", (cutoff,)
+        )
+    return row_id
+
+
+def list_recent_files(limit: int = 10) -> list[dict]:
+    init_db()
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT id, funded_date, filename, anomaly_count, size_bytes, created_at
+            FROM formatted_files
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_file(file_id: int) -> Optional[tuple[bytes, str]]:
+    init_db()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT filename, file_path FROM formatted_files WHERE id = ?",
+            (file_id,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return Path(row["file_path"]).read_bytes(), row["filename"]
+    except OSError:
+        return None
 
 
 def baseline(
