@@ -22,20 +22,40 @@ def resource_path(name: str) -> Path:
 
 DATA_FILE = resource_path("raw data (2).xlsx")
 LOGO_FILE = resource_path("Stinelogo.png")
+DATE_FORMAT = "%m/%d/%Y"
+
+
+def _coerce_date_columns(df: pd.DataFrame) -> pd.DataFrame:
+    # Excel sometimes stores dates as text. For any column whose name contains
+    # "date", try parsing as MM/DD/YYYY; adopt the parsed Timestamps only if
+    # at least 80% of non-empty values parsed cleanly. Keeps display identical
+    # while enabling chronological sort and date-aware filtering.
+    for col in df.columns:
+        if "date" not in str(col).lower():
+            continue
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            continue
+        parsed = pd.to_datetime(df[col], format=DATE_FORMAT, errors="coerce")
+        non_empty = df[col].notna().sum()
+        if non_empty and parsed.notna().sum() >= non_empty * 0.8:
+            df[col] = parsed
+    return df
 
 
 def load_workbook(path: Path) -> dict[str, pd.DataFrame]:
     sheets = pd.read_excel(path, sheet_name=None)
     return {
-        name: df.dropna(axis=1, how="all")
+        name: _coerce_date_columns(df.dropna(axis=1, how="all"))
         for name, df in sheets.items()
         if not df.dropna(how="all").empty
     }
 
 
 def fmt_cell(value) -> str:
-    if pd.isna(value):
+    if value is pd.NaT or pd.isna(value):
         return ""
+    if isinstance(value, pd.Timestamp):
+        return value.strftime(DATE_FORMAT)
     if isinstance(value, float):
         if value.is_integer():
             return f"{int(value):,}"
@@ -232,12 +252,15 @@ class App(tk.Tk):
             out = out[out[col].isin(chosen)]
         query = self.search_var.get().strip()
         if query:
-            mask = out.apply(
-                lambda row: row.astype(str)
-                .str.contains(query, case=False, na=False)
-                .any(),
-                axis=1,
-            )
+            mask = pd.Series(False, index=out.index)
+            for col in out.columns:
+                if pd.api.types.is_datetime64_any_dtype(out[col]):
+                    series = out[col].dt.strftime(DATE_FORMAT).fillna("")
+                else:
+                    series = out[col].astype(str)
+                mask = mask | series.str.contains(
+                    query, case=False, na=False, regex=False
+                )
             out = out[mask]
         self.filtered = out
         if self.sort_state is not None:
@@ -292,6 +315,17 @@ class App(tk.Tk):
         self.sort_state = (col, asc)
         self._apply_filters()
 
+    def _export_frame(self) -> pd.DataFrame:
+        # Render datetime columns back to MM/DD/YYYY so exports match the
+        # source file format users expect.
+        out = self.filtered.copy()
+        for col in out.columns:
+            if pd.api.types.is_datetime64_any_dtype(out[col]):
+                out[col] = out[col].dt.strftime(DATE_FORMAT).where(
+                    out[col].notna(), ""
+                )
+        return out
+
     def _export_csv(self) -> None:
         if self.filtered.empty:
             messagebox.showinfo(APP_NAME, "Nothing to export — the current view is empty.")
@@ -305,7 +339,7 @@ class App(tk.Tk):
         if not path:
             return
         try:
-            self.filtered.to_csv(path, index=False)
+            self._export_frame().to_csv(path, index=False)
         except OSError as e:
             messagebox.showerror(APP_NAME, f"Could not save CSV:\n{e}")
             return
@@ -325,7 +359,7 @@ class App(tk.Tk):
             return
         try:
             with pd.ExcelWriter(path, engine="openpyxl") as writer:
-                self.filtered.to_excel(
+                self._export_frame().to_excel(
                     writer, sheet_name=self.current_sheet[:31] or "Sheet1", index=False
                 )
         except OSError as e:
