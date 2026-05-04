@@ -1,25 +1,24 @@
 @echo off
-REM Stine Bank Data Viewer launcher.
-REM Bootstraps a local Python venv on first run, then starts the Streamlit
-REM web app and opens it in the default browser.
+REM Developer / "run from source" launcher.
+REM End users do NOT need this file — they get BankDataViewer.exe from the
+REM GitHub Releases page and double-click it.
+REM
+REM This .bat exists for local development: it creates a venv, installs
+REM dependencies, and runs app.py directly.
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
 set "APP=app.py"
 set "REQS=requirements.txt"
 set "VENV=.venv"
-set "PYEXE=%VENV%\Scripts\python.exe"
-set "PORT=8501"
+set "PYEXE=%VENV%\Scripts\pythonw.exe"
 
 if not exist "%APP%" (
-    echo [ERROR] Could not find "%APP%" in this folder:
-    echo   %~dp0
-    echo Make sure all program files stayed together.
+    echo [ERROR] Could not find "%APP%" in this folder.
     pause
     exit /b 1
 )
 
-REM --- Locate a Python launcher ---------------------------------------------
 set "PY="
 where py >nul 2>nul && set "PY=py -3"
 if not defined PY (
@@ -27,43 +26,22 @@ if not defined PY (
 )
 if not defined PY (
     echo [ERROR] Python is not installed or not on PATH.
-    echo.
-    echo Please install Python 3.10 or newer from:
-    echo     https://www.python.org/downloads/
-    echo During install, check "Add Python to PATH", then run this file again.
+    echo Install Python 3.10+ from https://www.python.org/downloads/
     pause
     exit /b 1
 )
 
-REM --- Create venv on first run ---------------------------------------------
 if not exist "%PYEXE%" (
     echo First-time setup: creating local Python environment...
-    %PY% -m venv "%VENV%"
-    if errorlevel 1 (
-        echo [ERROR] Failed to create virtual environment.
-        pause
-        exit /b 1
-    )
+    %PY% -m venv "%VENV%" || (echo [ERROR] venv creation failed & pause & exit /b 1)
 )
 
-REM --- Install / update dependencies ----------------------------------------
 if not exist "%VENV%\.deps_installed" (
-    echo Installing dependencies ^(one-time, ~30-60 seconds^)...
-    "%PYEXE%" -m pip install --upgrade pip >nul
-    "%PYEXE%" -m pip install -r "%REQS%"
-    if errorlevel 1 (
-        echo [ERROR] Failed to install dependencies.
-        pause
-        exit /b 1
-    )
+    echo Installing dependencies...
+    "%VENV%\Scripts\python.exe" -m pip install --upgrade pip >nul
+    "%VENV%\Scripts\python.exe" -m pip install -r "%REQS%" || (echo [ERROR] pip install failed & pause & exit /b 1)
     echo. > "%VENV%\.deps_installed"
 )
 
-REM --- Launch Streamlit and open browser ------------------------------------
-echo Starting Bank Data Viewer at http://localhost:%PORT% ...
-echo Close this window to stop the app.
-echo.
-start "" "http://localhost:%PORT%"
-"%PYEXE%" -m streamlit run "%APP%" --server.port %PORT% --server.headless true --browser.gatherUsageStats false
-
+start "" "%PYEXE%" "%APP%"
 endlocal
