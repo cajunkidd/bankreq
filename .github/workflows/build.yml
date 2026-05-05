@@ -66,19 +66,31 @@ jobs:
       - name: Verify Streamlit static files made it into the bundle
         shell: pwsh
         run: |
-          $bundleStatic = "build\BankDataViewer\localpycs"
-          # PyInstaller's --onefile keeps the file tree under build/<name>/
-          $found = Get-ChildItem -Recurse -Path "build\BankDataViewer" `
-                   -Filter "index.html" -ErrorAction SilentlyContinue |
-                   Where-Object { $_.FullName -match "streamlit[\\/]static[\\/]index\.html$" }
-          if ($found) {
-            Write-Host "OK: streamlit/static/index.html present in bundle:"
-            $found | ForEach-Object { Write-Host "  $($_.FullName) ($($_.Length) bytes)" }
-          } else {
-            Write-Error "FAIL: streamlit/static/index.html missing from build tree."
-            Get-ChildItem -Recurse -Path "build\BankDataViewer" -Filter "*.html" `
-              -ErrorAction SilentlyContinue | Select-Object -First 20 |
-              ForEach-Object { Write-Host "  found html: $($_.FullName)" }
+          # PyInstaller --onefile compresses everything into the .exe, so
+          # we can't grep build/ for plain files. Instead, parse the TOC
+          # files (Python literals listing every (src, dest, type) bundled).
+          $tocs = Get-ChildItem -Path "build\BankDataViewer" -Filter "*.toc" `
+                  -ErrorAction SilentlyContinue
+          if (-not $tocs) {
+            Write-Error "No .toc files found in build\BankDataViewer."
+            exit 1
+          }
+          $hit = $false
+          foreach ($t in $tocs) {
+            $text = Get-Content -Raw $t.FullName
+            if ($text -match "streamlit[\\/]+static[\\/]+index\.html") {
+              Write-Host "OK: streamlit/static/index.html listed in $($t.Name)"
+              $hit = $true
+              break
+            }
+          }
+          if (-not $hit) {
+            Write-Error "streamlit/static/index.html NOT in any TOC."
+            foreach ($t in $tocs) {
+              Write-Host "--- $($t.Name) (first matches for 'streamlit') ---"
+              Select-String -Path $t.FullName -Pattern "streamlit" -SimpleMatch |
+                Select-Object -First 5 | ForEach-Object { Write-Host $_.Line }
+            }
             exit 1
           }
 
