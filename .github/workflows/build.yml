@@ -34,7 +34,6 @@ jobs:
           --noconfirm
           --clean
           --onefile
-          --windowed
           --name "BankDataViewer"
           --icon "Stinelogo.ico"
           --add-data "app.py;."
