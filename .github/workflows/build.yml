@@ -63,6 +63,25 @@ jobs:
           --copy-metadata altair
           launcher.py
 
+      - name: Verify Streamlit static files made it into the bundle
+        shell: pwsh
+        run: |
+          $bundleStatic = "build\BankDataViewer\localpycs"
+          # PyInstaller's --onefile keeps the file tree under build/<name>/
+          $found = Get-ChildItem -Recurse -Path "build\BankDataViewer" `
+                   -Filter "index.html" -ErrorAction SilentlyContinue |
+                   Where-Object { $_.FullName -match "streamlit[\\/]static[\\/]index\.html$" }
+          if ($found) {
+            Write-Host "OK: streamlit/static/index.html present in bundle:"
+            $found | ForEach-Object { Write-Host "  $($_.FullName) ($($_.Length) bytes)" }
+          } else {
+            Write-Error "FAIL: streamlit/static/index.html missing from build tree."
+            Get-ChildItem -Recurse -Path "build\BankDataViewer" -Filter "*.html" `
+              -ErrorAction SilentlyContinue | Select-Object -First 20 |
+              ForEach-Object { Write-Host "  found html: $($_.FullName)" }
+            exit 1
+          }
+
       - name: Upload .exe as workflow artifact
         uses: actions/upload-artifact@v4
         with:
