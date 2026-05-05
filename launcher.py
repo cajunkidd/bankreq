@@ -6,6 +6,7 @@ in-process and opens the user's browser to the local server.
 """
 from __future__ import annotations
 
+import io
 import multiprocessing
 import os
 import socket
@@ -13,25 +14,82 @@ import sys
 import threading
 import time
 import traceback
+import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
 
 
 LOG_FILE = Path.home() / "BankDataViewer.log"
+_log_lock = threading.Lock()
+_log_fp = None  # type: ignore[var-annotated]
 
 
-def _log(msg: str) -> None:
-    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
+def _open_log() -> None:
+    global _log_fp
     try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        LOG_FILE.unlink(missing_ok=True)
     except OSError:
         pass
     try:
-        print(line, flush=True)
-    except Exception:
-        pass
+        _log_fp = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        _log_fp = None
+
+
+def _log(msg: str) -> None:
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n"
+    with _log_lock:
+        if _log_fp is not None:
+            try:
+                _log_fp.write(line)
+                _log_fp.flush()
+            except Exception:
+                pass
+        try:
+            sys.__stdout__.write(line)
+            sys.__stdout__.flush()
+        except Exception:
+            pass
+
+
+class _Tee:
+    """File-like that fan-outs writes to multiple underlying streams."""
+
+    def __init__(self, *streams) -> None:
+        self._streams = [s for s in streams if s is not None]
+
+    def write(self, data) -> int:
+        n = 0
+        for s in self._streams:
+            try:
+                n = s.write(data) or 0
+                s.flush()
+            except Exception:
+                pass
+        return n
+
+    def flush(self) -> None:
+        for s in self._streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+    def isatty(self) -> bool:
+        return False
+
+    def fileno(self) -> int:
+        raise io.UnsupportedOperation
+
+
+def _install_stream_tees() -> None:
+    """Capture all stdout/stderr to the log file in addition to the console
+    so Streamlit's own output is visible even without a console window."""
+    if _log_fp is None:
+        return
+    sys.stdout = _Tee(sys.__stdout__, _log_fp)
+    sys.stderr = _Tee(sys.__stderr__, _log_fp)
 
 
 def _bundle_root() -> Path:
@@ -51,37 +109,35 @@ def _find_free_port(preferred: int = 8501) -> int:
     return preferred
 
 
-def _silence_missing_streams() -> None:
-    if sys.stdout is None:
-        sys.stdout = open(os.devnull, "w")
-    if sys.stderr is None:
-        sys.stderr = open(os.devnull, "w")
-
-
 def _open_browser_when_ready(port: int) -> None:
-    deadline = time.time() + 60
+    deadline = time.time() + 90
     url = f"http://localhost:{port}/"
+    last_status = ""
+    next_progress = time.time() + 5
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=1) as resp:
-                if 200 <= resp.status < 500:
-                    _log(
-                        f"HTTP {resp.status} from {url}; opening browser."
-                    )
-                    webbrowser.open(url)
-                    return
-        except Exception:
-            time.sleep(0.4)
-    _log(f"Timed out waiting for HTTP response from {url}.")
+                _log(f"HTTP {resp.status} from {url}; opening browser.")
+                webbrowser.open(url)
+                return
+        except urllib.error.HTTPError as e:
+            last_status = f"HTTP {e.code}"
+        except urllib.error.URLError as e:
+            last_status = f"URLError: {e.reason}"
+        except Exception as e:  # noqa: BLE001
+            last_status = f"{type(e).__name__}: {e}"
+        if time.time() >= next_progress:
+            _log(f"Still waiting for {url} ({last_status})")
+            next_progress = time.time() + 5
+        time.sleep(0.4)
+    _log(f"Timed out after 90s waiting for {url} (last={last_status}).")
 
 
 def main() -> None:
-    _silence_missing_streams()
-    try:
-        LOG_FILE.unlink(missing_ok=True)
-    except OSError:
-        pass
+    _open_log()
+    _install_stream_tees()
     _log(f"Starting Bank Data Viewer (frozen={getattr(sys, 'frozen', False)}).")
+    _log(f"Python: {sys.version.split()[0]}, executable: {sys.executable}")
 
     base = _bundle_root()
     app_path = base / "app.py"
@@ -95,10 +151,6 @@ def main() -> None:
     port = _find_free_port(8501)
     _log(f"Bound port:  {port}")
 
-    # Belt-and-suspenders: env vars + explicit flag_options to bootstrap.run.
-    # When Streamlit ships inside a frozen bundle some env vars get ignored
-    # (it will otherwise auto-detect itself as being in dev mode and try to
-    # proxy to localhost:3000). Passing config in flag_options is binding.
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
     os.environ["STREAMLIT_SERVER_PORT"] = str(port)
@@ -123,10 +175,12 @@ def main() -> None:
     ).start()
 
     try:
+        _log("Importing streamlit.web.bootstrap ...")
         from streamlit.web import bootstrap
 
         _log(f"Calling streamlit bootstrap.run with flag_options={flag_options}")
         bootstrap.run(str(app_path), False, [], flag_options)
+        _log("bootstrap.run returned (server stopped).")
     except SystemExit:
         raise
     except BaseException:
