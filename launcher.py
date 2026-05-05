@@ -181,6 +181,32 @@ def _open_browser_when_ready(port: int) -> None:
     _log(f"Timed out after 90s waiting for {url} (last={last_status}).")
 
 
+def _patch_streamlit_static_dir() -> None:
+    """Inside a PyInstaller bundle, streamlit.file_util.get_static_dir
+    derives its path from streamlit.file_util.__file__, which resolves
+    incorrectly when the .py is loaded from PyInstaller's PYZ archive.
+    The result fails os.path.isdir(), Streamlit silently skips its '/'
+    static mount, and every request returns 404 (only the hardcoded
+    /_stcore/health endpoint works). Override the function to return
+    the known-good path next to streamlit/__init__.pyc in the bundle."""
+    if not getattr(sys, "frozen", False):
+        return
+    bundle_static = _bundle_root() / "streamlit" / "static"
+    if not bundle_static.is_dir():
+        _log(
+            f"WARNING: bundle static dir missing at {bundle_static}; "
+            "skipping patch."
+        )
+        return
+    try:
+        import streamlit.file_util as _fu  # type: ignore
+
+        _fu.get_static_dir = lambda: str(bundle_static)  # type: ignore[assignment]
+        _log(f"Patched streamlit.file_util.get_static_dir -> {bundle_static}")
+    except Exception as e:  # noqa: BLE001
+        _log(f"Failed to patch streamlit.file_util.get_static_dir: {e}")
+
+
 def main() -> None:
     _open_log()
     _install_stream_tees()
@@ -219,6 +245,7 @@ def main() -> None:
     }
 
     _diagnose_bundle()
+    _patch_streamlit_static_dir()
 
     threading.Thread(
         target=_open_browser_when_ready, args=(port,), daemon=True
@@ -227,6 +254,23 @@ def main() -> None:
     try:
         _log("Importing streamlit.web.bootstrap ...")
         from streamlit.web import bootstrap
+
+        # Verify the patch is visible to the static-routes module that
+        # actually consults file_util.get_static_dir().
+        try:
+            from streamlit.web.server.starlette import (
+                starlette_static_routes as _ssr,
+            )
+            from streamlit import file_util as _fu
+
+            resolved = _fu.get_static_dir()
+            _log(
+                f"Post-patch get_static_dir() -> {resolved} "
+                f"(isdir={os.path.isdir(resolved)})"
+            )
+            _ = _ssr  # silence unused import linter
+        except Exception as e:  # noqa: BLE001
+            _log(f"Post-patch verification failed: {e}")
 
         _log(f"Calling streamlit bootstrap.run with flag_options={flag_options}")
         bootstrap.run(str(app_path), False, [], flag_options)
