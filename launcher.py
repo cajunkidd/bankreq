@@ -181,6 +181,28 @@ def _open_browser_when_ready(port: int) -> None:
     _log(f"Timed out after 90s waiting for {url} (last={last_status}).")
 
 
+def _force_streamlit_production_mode() -> None:
+    """Streamlit decides 'I'm in dev mode' if its __file__ does not contain
+    'site-packages' / 'dist-packages'. In a PyInstaller bundle __file__ is in
+    a temp directory, so dev mode defaults to True. In dev mode Streamlit
+    skips registering its '/' static-files mount and every page returns 404
+    (only hardcoded API routes like /_stcore/health work).
+
+    Override the option directly via config.set_option BEFORE the value is
+    memoized by anything else in Streamlit's startup path."""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        from streamlit import config as _cfg
+
+        _cfg.set_option(
+            "global.developmentMode", False, where_defined="bank-data-viewer-launcher"
+        )
+        _log("Forced global.developmentMode=False via config.set_option.")
+    except Exception as e:  # noqa: BLE001
+        _log(f"Failed to force production mode: {e}")
+
+
 def _patch_streamlit_static_dir() -> None:
     """Inside a PyInstaller bundle, streamlit.file_util.get_static_dir
     derives its path from streamlit.file_util.__file__, which resolves
@@ -245,6 +267,7 @@ def main() -> None:
     }
 
     _diagnose_bundle()
+    _force_streamlit_production_mode()
     _patch_streamlit_static_dir()
 
     threading.Thread(
@@ -255,20 +278,20 @@ def main() -> None:
         _log("Importing streamlit.web.bootstrap ...")
         from streamlit.web import bootstrap
 
-        # Verify the patch is visible to the static-routes module that
-        # actually consults file_util.get_static_dir().
+        # Verify the patches actually took effect on the values that
+        # Streamlit's route construction will read.
         try:
-            from streamlit.web.server.starlette import (
-                starlette_static_routes as _ssr,
-            )
+            from streamlit import config as _cfg
             from streamlit import file_util as _fu
 
             resolved = _fu.get_static_dir()
+            dev_mode = bool(_cfg.get_option("global.developmentMode"))
+            base_url = _cfg.get_option("server.baseUrlPath")
             _log(
-                f"Post-patch get_static_dir() -> {resolved} "
-                f"(isdir={os.path.isdir(resolved)})"
+                f"Post-patch: get_static_dir={resolved} "
+                f"(isdir={os.path.isdir(resolved)}), dev_mode={dev_mode}, "
+                f"base_url={base_url!r}"
             )
-            _ = _ssr  # silence unused import linter
         except Exception as e:  # noqa: BLE001
             _log(f"Post-patch verification failed: {e}")
 
