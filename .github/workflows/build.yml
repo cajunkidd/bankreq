@@ -25,7 +25,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller==6.10.0
+          pip install pyinstaller==6.11.1
+
+      - name: Locate Streamlit static directory
+        shell: pwsh
+        run: |
+          $stDir = python -c "import streamlit, os; print(os.path.join(os.path.dirname(streamlit.__file__), 'static'))"
+          Write-Host "Streamlit static dir: $stDir"
+          if (-not (Test-Path $stDir)) {
+            Write-Error "Streamlit static directory not found at $stDir"
+            exit 1
+          }
+          $childCount = (Get-ChildItem $stDir -Recurse -File | Measure-Object).Count
+          Write-Host "Streamlit static dir contains $childCount files."
+          "STREAMLIT_STATIC=$stDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build single-file .exe
         shell: cmd
@@ -39,6 +52,7 @@ jobs:
           --add-data "app.py;."
           --add-data "raw data (2).xlsx;."
           --add-data "Stinelogo_white_rec.svg;."
+          --add-data "%STREAMLIT_STATIC%;streamlit/static"
           --collect-all streamlit
           --collect-all numpy
           --collect-all pandas
