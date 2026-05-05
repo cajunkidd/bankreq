@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -59,18 +60,19 @@ def _silence_missing_streams() -> None:
 
 def _open_browser_when_ready(port: int) -> None:
     deadline = time.time() + 60
-    url = f"http://localhost:{port}"
+    url = f"http://localhost:{port}/"
     while time.time() < deadline:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            try:
-                s.connect(("127.0.0.1", port))
-                _log(f"Server up on {url}; opening browser.")
-                webbrowser.open(url)
-                return
-            except OSError:
-                time.sleep(0.3)
-    _log(f"Timed out waiting for server on {url}.")
+        try:
+            with urllib.request.urlopen(url, timeout=1) as resp:
+                if 200 <= resp.status < 500:
+                    _log(
+                        f"HTTP {resp.status} from {url}; opening browser."
+                    )
+                    webbrowser.open(url)
+                    return
+        except Exception:
+            time.sleep(0.4)
+    _log(f"Timed out waiting for HTTP response from {url}.")
 
 
 def main() -> None:
@@ -93,6 +95,10 @@ def main() -> None:
     port = _find_free_port(8501)
     _log(f"Bound port:  {port}")
 
+    # Belt-and-suspenders: env vars + explicit flag_options to bootstrap.run.
+    # When Streamlit ships inside a frozen bundle some env vars get ignored
+    # (it will otherwise auto-detect itself as being in dev mode and try to
+    # proxy to localhost:3000). Passing config in flag_options is binding.
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
     os.environ["STREAMLIT_SERVER_PORT"] = str(port)
@@ -100,13 +106,27 @@ def main() -> None:
     os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
     os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
 
-    threading.Thread(target=_open_browser_when_ready, args=(port,), daemon=True).start()
+    flag_options = {
+        "browser.gatherUsageStats": False,
+        "browser.serverAddress": "localhost",
+        "browser.serverPort": port,
+        "server.headless": True,
+        "server.port": port,
+        "server.address": "127.0.0.1",
+        "server.fileWatcherType": "none",
+        "server.runOnSave": False,
+        "global.developmentMode": False,
+    }
+
+    threading.Thread(
+        target=_open_browser_when_ready, args=(port,), daemon=True
+    ).start()
 
     try:
         from streamlit.web import bootstrap
 
-        _log("Calling streamlit bootstrap.run...")
-        bootstrap.run(str(app_path), False, [], {})
+        _log(f"Calling streamlit bootstrap.run with flag_options={flag_options}")
+        bootstrap.run(str(app_path), False, [], flag_options)
     except SystemExit:
         raise
     except BaseException:
