@@ -109,11 +109,48 @@ def _find_free_port(preferred: int = 8501) -> int:
     return preferred
 
 
+def _diagnose_bundle() -> None:
+    """Log enough about the frozen bundle's filesystem layout to figure out
+    why Streamlit might 404. We log the streamlit static directory's contents
+    and where streamlit.__file__ points."""
+    base = _bundle_root()
+    static = base / "streamlit" / "static"
+    _log(f"Bundle streamlit/static: {static} (exists={static.exists()})")
+    if static.exists():
+        try:
+            entries = sorted(p.name for p in static.iterdir())
+            _log(f"  top-level entries ({len(entries)}): {entries[:20]}")
+            index_html = static / "index.html"
+            _log(
+                f"  index.html: exists={index_html.exists()}, "
+                f"size={index_html.stat().st_size if index_html.exists() else 'n/a'}"
+            )
+        except OSError as e:
+            _log(f"  error listing static dir: {e}")
+    try:
+        import streamlit  # type: ignore
+
+        _log(f"streamlit.__file__: {streamlit.__file__}")
+        st_dir = Path(streamlit.__file__).parent
+        st_static = st_dir / "static"
+        _log(
+            f"streamlit static (via __file__): {st_static} "
+            f"(exists={st_static.exists()})"
+        )
+        if st_static.exists():
+            idx = st_static / "index.html"
+            _log(f"  index.html via __file__: exists={idx.exists()}")
+    except Exception as e:  # noqa: BLE001
+        _log(f"streamlit import diagnostic failed: {e}")
+
+
 def _open_browser_when_ready(port: int) -> None:
     deadline = time.time() + 90
     url = f"http://localhost:{port}/"
+    health_url = f"http://localhost:{port}/_stcore/health"
     last_status = ""
     next_progress = time.time() + 5
+    health_logged = False
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=1) as resp:
@@ -122,6 +159,17 @@ def _open_browser_when_ready(port: int) -> None:
                 return
         except urllib.error.HTTPError as e:
             last_status = f"HTTP {e.code}"
+            if not health_logged:
+                try:
+                    with urllib.request.urlopen(health_url, timeout=1) as hresp:
+                        body = hresp.read(64).decode("utf-8", "replace")
+                        _log(
+                            f"Probe {health_url}: HTTP {hresp.status} body={body!r}"
+                        )
+                        health_logged = True
+                except Exception as he:  # noqa: BLE001
+                    _log(f"Probe {health_url}: {type(he).__name__}: {he}")
+                    health_logged = True
         except urllib.error.URLError as e:
             last_status = f"URLError: {e.reason}"
         except Exception as e:  # noqa: BLE001
@@ -169,6 +217,8 @@ def main() -> None:
         "server.runOnSave": False,
         "global.developmentMode": False,
     }
+
+    _diagnose_bundle()
 
     threading.Thread(
         target=_open_browser_when_ready, args=(port,), daemon=True
