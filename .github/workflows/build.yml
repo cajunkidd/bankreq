@@ -37,12 +37,18 @@ jobs:
           --windowed
           --name "BankDataViewer"
           --icon "Stinelogo.ico"
+          --add-data "app.py;."
           --add-data "raw data (2).xlsx;."
-          --add-data "Stinelogo.png;."
+          --add-data "Stinelogo_white_rec.svg;."
+          --collect-all streamlit
           --collect-all numpy
           --collect-all pandas
           --collect-all openpyxl
-          app.py
+          --collect-all altair
+          --collect-all pyarrow
+          --copy-metadata streamlit
+          --copy-metadata altair
+          launcher.py
 
       - name: Upload .exe as workflow artifact
         uses: actions/upload-artifact@v4
