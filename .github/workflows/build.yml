@@ -50,7 +50,6 @@ jobs:
           --name "BankDataViewer"
           --icon "Stinelogo.ico"
           --add-data "app.py;."
-          --add-data "raw data (2).xlsx;."
           --add-data "Stinelogo_white_rec.svg;."
           --add-data "%STREAMLIT_STATIC%;streamlit/static"
           --collect-all streamlit
