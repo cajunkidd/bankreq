@@ -11,6 +11,7 @@ import multiprocessing
 import os
 import socket
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -144,6 +145,26 @@ def _diagnose_bundle() -> None:
         _log(f"streamlit import diagnostic failed: {e}")
 
 
+def _try_claim_open_lock(port: int) -> bool:
+    """Return True if this process should be the one to open the browser.
+
+    PyInstaller bundles can spawn the launcher in more than one process
+    (multiprocessing children, bootloader re-execs, accidental relaunches),
+    each of which would otherwise call webbrowser.open and produce a
+    duplicate tab. A tempfile mtime lock — first writer wins for ~30s —
+    deduplicates without IPC."""
+    lock = Path(tempfile.gettempdir()) / f"BankDataViewer_{port}.tab_opened"
+    try:
+        if lock.exists() and time.time() - lock.stat().st_mtime < 30:
+            _log(f"Browser tab lock {lock} is fresh; another process opened the tab.")
+            return False
+        lock.touch()
+        return True
+    except OSError as e:
+        _log(f"Browser tab lock check failed ({e}); opening anyway.")
+        return True
+
+
 def _open_browser_when_ready(port: int) -> None:
     deadline = time.time() + 90
     url = f"http://localhost:{port}/"
@@ -154,8 +175,10 @@ def _open_browser_when_ready(port: int) -> None:
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=1) as resp:
-                _log(f"HTTP {resp.status} from {url}; opening browser.")
-                webbrowser.open(url)
+                _log(f"HTTP {resp.status} from {url}; checking tab-open lock.")
+                if _try_claim_open_lock(port):
+                    _log(f"Opening browser at {url}.")
+                    webbrowser.open(url)
                 return
         except urllib.error.HTTPError as e:
             last_status = f"HTTP {e.code}"

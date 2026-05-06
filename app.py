@@ -18,7 +18,17 @@ from openpyxl.worksheet.worksheet import Worksheet
 ROOT = Path(__file__).parent
 LOGO_FILE = ROOT / "Stinelogo_white_rec.svg"
 
-st.set_page_config(page_title="Stine BankReq Reformatter", layout="wide")
+st.set_page_config(page_title="Stine CardConnect Reformatter", layout="wide")
+
+st.markdown(
+    """
+    <style>
+    .stDeployButton {display: none !important;}
+    [data-testid="stDeployButton"] {display: none !important;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 OUT_COLS = [
     "Site Alternate ID",
@@ -230,7 +240,9 @@ def write_workbook(raw_bytes: bytes, sections: list[tuple[str, list[dict], pd.Da
         if not branches:
             continue
         if label == NET_SALES_SHEET:
-            for branch in branches:
+            for i, branch in enumerate(branches):
+                if i > 0:
+                    cur += 1  # blank row between branches for readability
                 cur = _write_branch(
                     ws, cur, branch, draw_branch_box=True, always_sum=False
                 )
@@ -243,7 +255,9 @@ def write_workbook(raw_bytes: bytes, sections: list[tuple[str, list[dict], pd.Da
             header_cell.font = BOLD
             _apply_border(header_cell, right=THICK)
             cur = section_top + 1
-            for branch in branches:
+            for i, branch in enumerate(branches):
+                if i > 0:
+                    cur += 1
                 cur = _write_branch(
                     ws, cur, branch, draw_branch_box=False, always_sum=True
                 )
@@ -282,7 +296,7 @@ def main() -> None:
         if LOGO_FILE.exists():
             st.image(str(LOGO_FILE), width=160)
     with col_title:
-        st.title("BankReq Reformatter")
+        st.title("CardConnect Reformatter")
         st.caption(
             "Drop the daily raw credit-card transaction workbook below. "
             "The formatted BankReq file will download automatically."
