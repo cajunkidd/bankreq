@@ -41,13 +41,16 @@ OUT_COLS = [
 PRODUCT_ORDER = ["Amex", "DebitCard", "Discover", "Mastercard", "Visa"]
 
 NET_SALES_SHEET = "Net Sales"
-APPENDED_SHEETS = ["Adjustments", "Chargebacks & Chargeback Revers"]
+ADJUSTMENTS_SHEET = "Adjustments"
+CHARGEBACKS_SHEET = "Chargebacks & Chargeback Revers"
+RED = "FFFF0000"
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 THICK = Side(style="thick")
 THIN = Side(style="thin")
 BOLD = Font(bold=True)
+RED_FONT = Font(color=RED)
 
 
 def _product_key(p: object) -> tuple[int, int, str]:
@@ -103,48 +106,43 @@ def _group_section(df: pd.DataFrame) -> pd.DataFrame:
     return grouped[OUT_COLS].reset_index(drop=True)
 
 
-def _branches_from_grouped(df: pd.DataFrame) -> list[dict]:
-    branches: list[dict] = []
-    for (site_id, funded, site_name), group in df.groupby(
-        ["Site Alternate ID", "Funded Date", "Site Name"], sort=False
-    ):
-        rows = [
-            (row["Product Code"], row["Processed Transaction Amount"])
-            for _, row in group.iterrows()
-        ]
-        branches.append(
-            {
-                "Site Alternate ID": site_id,
-                "Funded Date": funded,
-                "Site Name": site_name,
-                "rows": rows,
-            }
-        )
-    return branches
-
-
-def build_sections(sheets: dict[str, pd.DataFrame]) -> list[tuple[str, list[dict], pd.DataFrame]]:
-    sections: list[tuple[str, list[dict], pd.DataFrame]] = []
-    net = sheets.get(NET_SALES_SHEET)
-    if net is not None and not net.empty:
-        block = _group_section(net)
-        if not block.empty:
-            sections.append((NET_SALES_SHEET, _branches_from_grouped(block), block))
-    for name in APPENDED_SHEETS:
-        df = sheets.get(name)
+def build_branches(sheets: dict[str, pd.DataFrame]) -> list[dict]:
+    """Merge every site's Net Sales, Adjustments, and Chargebacks into a single
+    branch dict. Adjustments and chargeback rows are tagged red so the writer
+    can render them in red text."""
+    sources = [
+        (NET_SALES_SHEET, "net"),
+        (ADJUSTMENTS_SHEET, "adj"),
+        (CHARGEBACKS_SHEET, "cb"),
+    ]
+    by_branch: dict[tuple, dict] = {}
+    for sheet_name, role in sources:
+        df = sheets.get(sheet_name)
         if df is None or df.empty:
             continue
         block = _group_section(df)
-        if not block.empty:
-            sections.append((name, _branches_from_grouped(block), block))
-    return sections
+        for _, row in block.iterrows():
+            key = (str(row["Site Alternate ID"]), row["Funded Date"], row["Site Name"])
+            if key not in by_branch:
+                by_branch[key] = {
+                    "Site Alternate ID": key[0],
+                    "Funded Date": key[1],
+                    "Site Name": key[2],
+                    "net": [],
+                    "adj": [],
+                    "cb": [],
+                }
+            by_branch[key][role].append(
+                (row["Product Code"], row["Processed Transaction Amount"])
+            )
+    return sorted(by_branch.values(), key=lambda b: _site_key(b["Site Alternate ID"]))
 
 
-def derive_output_filename(sections: list[tuple[str, list[dict], pd.DataFrame]]) -> str:
-    for _, _, df in sections:
-        if df.empty:
+def derive_output_filename(branches: list[dict]) -> str:
+    for branch in branches:
+        raw = branch.get("Funded Date")
+        if not raw:
             continue
-        raw = df.iloc[0]["Funded Date"]
         try:
             dt = pd.to_datetime(raw)
             return f"BankReq - {dt.strftime('%m-%d-%Y')}.xlsx"
@@ -172,30 +170,36 @@ def _draw_thick_box(ws: Worksheet, top_row: int, bottom_row: int, left_col: int 
         _apply_border(ws.cell(row=r, column=right_col), right=THICK)
 
 
-def _write_data_row(ws: Worksheet, row: int, branch: dict, product: str, amount: object) -> None:
-    site_id = branch["Site Alternate ID"]
-    ws.cell(row=row, column=1, value=str(site_id) if site_id is not None else None)
-    ws.cell(row=row, column=2, value=branch["Funded Date"])
-    ws.cell(row=row, column=3, value=branch["Site Name"])
-    ws.cell(row=row, column=4, value=product)
-    ws.cell(
-        row=row,
-        column=5,
-        value=float(amount) if pd.notna(amount) else None,
-    )
-
-
-def _write_branch(
+def _write_data_row(
     ws: Worksheet,
-    start_row: int,
+    row: int,
     branch: dict,
+    product: str,
+    amount: object,
     *,
-    draw_branch_box: bool,
-    always_sum: bool,
-) -> int:
-    rows = branch["rows"]
-    amex = [(p, a) for p, a in rows if str(p) == "Amex"]
-    others = [(p, a) for p, a in rows if str(p) != "Amex"]
+    red: bool = False,
+) -> None:
+    site_id = branch["Site Alternate ID"]
+    cells = [
+        ws.cell(row=row, column=1, value=str(site_id) if site_id is not None else None),
+        ws.cell(row=row, column=2, value=branch["Funded Date"]),
+        ws.cell(row=row, column=3, value=branch["Site Name"]),
+        ws.cell(row=row, column=4, value=product),
+        ws.cell(
+            row=row,
+            column=5,
+            value=float(amount) if pd.notna(amount) else None,
+        ),
+    ]
+    if red:
+        for c in cells:
+            c.font = RED_FONT
+
+
+def _write_branch(ws: Worksheet, start_row: int, branch: dict) -> int:
+    net_rows = branch["net"]
+    amex = [(p, a) for p, a in net_rows if str(p) == "Amex"]
+    others = [(p, a) for p, a in net_rows if str(p) != "Amex"]
     others.sort(key=lambda x: _product_key(x[0]))
 
     cur = start_row
@@ -203,27 +207,30 @@ def _write_branch(
         _write_data_row(ws, cur, branch, product, amount)
         cur += 1
 
-    if others:
-        box_top = cur
-        for product, amount in others:
-            _write_data_row(ws, cur, branch, product, amount)
-            cur += 1
+    box_top = cur
+    for product, amount in others:
+        _write_data_row(ws, cur, branch, product, amount)
+        cur += 1
+    for product, amount in branch["adj"]:
+        _write_data_row(ws, cur, branch, product, amount, red=True)
+        cur += 1
+    for product, amount in branch["cb"]:
+        _write_data_row(ws, cur, branch, product, amount, red=True)
+        cur += 1
+
+    if cur > box_top:
         box_bottom = cur - 1
-        if draw_branch_box:
-            _draw_thick_box(ws, box_top, box_bottom)
-        single_row = box_top == box_bottom
-        had_amex = bool(amex)
-        if always_sum or had_amex or not single_row:
-            ws.cell(
-                row=box_bottom,
-                column=6,
-                value=f"=SUM(E{box_top}:E{box_bottom})",
-            )
+        _draw_thick_box(ws, box_top, box_bottom)
+        ws.cell(
+            row=box_bottom,
+            column=6,
+            value=f"=SUM(E{box_top}:E{box_bottom})",
+        )
 
     return cur
 
 
-def write_workbook(raw_bytes: bytes, sections: list[tuple[str, list[dict], pd.DataFrame]]) -> bytes:
+def write_workbook(raw_bytes: bytes, branches: list[dict]) -> bytes:
     wb = load_workbook(io.BytesIO(raw_bytes))
     if "Formatted" in wb.sheetnames:
         del wb["Formatted"]
@@ -235,35 +242,10 @@ def write_workbook(raw_bytes: bytes, sections: list[tuple[str, list[dict], pd.Da
         _apply_border(cell, bottom=THIN)
 
     cur = 2
-    seen_section = False
-    for label, branches, _ in sections:
-        if not branches:
-            continue
-        if label == NET_SALES_SHEET:
-            for i, branch in enumerate(branches):
-                if i > 0:
-                    cur += 1  # blank row between branches for readability
-                cur = _write_branch(
-                    ws, cur, branch, draw_branch_box=True, always_sum=False
-                )
-            seen_section = True
-        else:
-            if seen_section:
-                cur += 1  # blank separator row before appended sections
-            section_top = cur
-            header_cell = ws.cell(row=section_top, column=1, value=f"From: {label}")
-            header_cell.font = BOLD
-            _apply_border(header_cell, right=THICK)
-            cur = section_top + 1
-            for i, branch in enumerate(branches):
-                if i > 0:
-                    cur += 1
-                cur = _write_branch(
-                    ws, cur, branch, draw_branch_box=False, always_sum=True
-                )
-            section_bottom = cur - 1
-            _draw_thick_box(ws, section_top, section_bottom)
-            seen_section = True
+    for i, branch in enumerate(branches):
+        if i > 0:
+            cur += 1  # blank row between branches for readability
+        cur = _write_branch(ws, cur, branch)
 
     out = io.BytesIO()
     wb.save(out)
@@ -317,16 +299,16 @@ def main() -> None:
         st.error(f"Could not read the uploaded workbook: {e}")
         return
 
-    sections = build_sections(sheets)
-    if not sections:
+    branches = build_branches(sheets)
+    if not branches:
         st.error(
             "No usable rows found. Expected a 'Net Sales' sheet with the "
             "standard BankReq columns."
         )
         return
 
-    output_bytes = write_workbook(raw_bytes, sections)
-    filename = derive_output_filename(sections)
+    output_bytes = write_workbook(raw_bytes, branches)
+    filename = derive_output_filename(branches)
 
     token = hashlib.sha1(raw_bytes).hexdigest()
     trigger_browser_download(output_bytes, filename, token)
@@ -339,11 +321,56 @@ def main() -> None:
         mime=XLSX_MIME,
     )
 
-    st.subheader("Preview")
-    for label, _, df in sections:
-        if label != NET_SALES_SHEET:
-            st.markdown(f"**From: {label}**")
-        st.dataframe(df, use_container_width=True, hide_index=True)
+    preview_rows = []
+    for branch in branches:
+        for product, amount in branch["net"]:
+            preview_rows.append(
+                {
+                    "Site Alternate ID": branch["Site Alternate ID"],
+                    "Funded Date": branch["Funded Date"],
+                    "Site Name": branch["Site Name"],
+                    "Product Code": product,
+                    "Processed Transaction Amount": amount,
+                    "Source": "Net Sales",
+                }
+            )
+        for product, amount in branch["adj"]:
+            preview_rows.append(
+                {
+                    "Site Alternate ID": branch["Site Alternate ID"],
+                    "Funded Date": branch["Funded Date"],
+                    "Site Name": branch["Site Name"],
+                    "Product Code": product,
+                    "Processed Transaction Amount": amount,
+                    "Source": "Adjustments",
+                }
+            )
+        for product, amount in branch["cb"]:
+            preview_rows.append(
+                {
+                    "Site Alternate ID": branch["Site Alternate ID"],
+                    "Funded Date": branch["Funded Date"],
+                    "Site Name": branch["Site Name"],
+                    "Product Code": product,
+                    "Processed Transaction Amount": amount,
+                    "Source": "Chargebacks",
+                }
+            )
+    if preview_rows:
+        st.subheader("Preview")
+        preview_df = pd.DataFrame(preview_rows)
+
+        def _highlight_red(row):
+            return [
+                "color: red" if row["Source"] in ("Adjustments", "Chargebacks") else ""
+                for _ in row
+            ]
+
+        st.dataframe(
+            preview_df.style.apply(_highlight_red, axis=1),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 if __name__ == "__main__":
