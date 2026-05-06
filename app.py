@@ -20,6 +20,16 @@ LOGO_FILE = ROOT / "Stinelogo_white_rec.svg"
 
 st.set_page_config(page_title="Stine CardConnect Reformatter", layout="wide")
 
+st.markdown(
+    """
+    <style>
+    .stDeployButton {display: none !important;}
+    [data-testid="stDeployButton"] {display: none !important;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 OUT_COLS = [
     "Site Alternate ID",
     "Funded Date",
