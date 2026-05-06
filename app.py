@@ -12,6 +12,8 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from openpyxl import load_workbook
+from openpyxl.styles import Border, Font, Side
+from openpyxl.worksheet.worksheet import Worksheet
 
 ROOT = Path(__file__).parent
 LOGO_FILE = ROOT / "Stinelogo_white_rec.svg"
@@ -26,15 +28,16 @@ OUT_COLS = [
     "Processed Transaction Amount",
 ]
 
-# Product order matches the accounting team's template: Amex, DebitCard,
-# Discover, Mastercard, Visa. Anything outside this list is appended in
-# alphabetical order at the end of each site's group.
 PRODUCT_ORDER = ["Amex", "DebitCard", "Discover", "Mastercard", "Visa"]
 
 NET_SALES_SHEET = "Net Sales"
 APPENDED_SHEETS = ["Adjustments", "Chargebacks & Chargeback Revers"]
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+THICK = Side(style="thick")
+THIN = Side(style="thin")
+BOLD = Font(bold=True)
 
 
 def _product_key(p: object) -> tuple[int, int, str]:
@@ -90,25 +93,45 @@ def _group_section(df: pd.DataFrame) -> pd.DataFrame:
     return grouped[OUT_COLS].reset_index(drop=True)
 
 
-def build_sections(sheets: dict[str, pd.DataFrame]) -> list[tuple[str, pd.DataFrame]]:
-    sections: list[tuple[str, pd.DataFrame]] = []
+def _branches_from_grouped(df: pd.DataFrame) -> list[dict]:
+    branches: list[dict] = []
+    for (site_id, funded, site_name), group in df.groupby(
+        ["Site Alternate ID", "Funded Date", "Site Name"], sort=False
+    ):
+        rows = [
+            (row["Product Code"], row["Processed Transaction Amount"])
+            for _, row in group.iterrows()
+        ]
+        branches.append(
+            {
+                "Site Alternate ID": site_id,
+                "Funded Date": funded,
+                "Site Name": site_name,
+                "rows": rows,
+            }
+        )
+    return branches
+
+
+def build_sections(sheets: dict[str, pd.DataFrame]) -> list[tuple[str, list[dict], pd.DataFrame]]:
+    sections: list[tuple[str, list[dict], pd.DataFrame]] = []
     net = sheets.get(NET_SALES_SHEET)
     if net is not None and not net.empty:
         block = _group_section(net)
         if not block.empty:
-            sections.append((NET_SALES_SHEET, block))
+            sections.append((NET_SALES_SHEET, _branches_from_grouped(block), block))
     for name in APPENDED_SHEETS:
         df = sheets.get(name)
         if df is None or df.empty:
             continue
         block = _group_section(df)
         if not block.empty:
-            sections.append((name, block))
+            sections.append((name, _branches_from_grouped(block), block))
     return sections
 
 
-def derive_output_filename(sections: list[tuple[str, pd.DataFrame]]) -> str:
-    for _, df in sections:
+def derive_output_filename(sections: list[tuple[str, list[dict], pd.DataFrame]]) -> str:
+    for _, _, df in sections:
         if df.empty:
             continue
         raw = df.iloc[0]["Funded Date"]
@@ -120,30 +143,113 @@ def derive_output_filename(sections: list[tuple[str, pd.DataFrame]]) -> str:
     return f"BankReq - {datetime.now().strftime('%m-%d-%Y')}.xlsx"
 
 
-def write_workbook(raw_bytes: bytes, sections: list[tuple[str, pd.DataFrame]]) -> bytes:
+def _apply_border(cell, *, left=None, right=None, top=None, bottom=None) -> None:
+    b = cell.border
+    cell.border = Border(
+        left=left if left is not None else b.left,
+        right=right if right is not None else b.right,
+        top=top if top is not None else b.top,
+        bottom=bottom if bottom is not None else b.bottom,
+    )
+
+
+def _draw_thick_box(ws: Worksheet, top_row: int, bottom_row: int, left_col: int = 1, right_col: int = 6) -> None:
+    for c in range(left_col, right_col + 1):
+        _apply_border(ws.cell(row=top_row, column=c), top=THICK)
+        _apply_border(ws.cell(row=bottom_row, column=c), bottom=THICK)
+    for r in range(top_row, bottom_row + 1):
+        _apply_border(ws.cell(row=r, column=left_col), left=THICK)
+        _apply_border(ws.cell(row=r, column=right_col), right=THICK)
+
+
+def _write_data_row(ws: Worksheet, row: int, branch: dict, product: str, amount: object) -> None:
+    site_id = branch["Site Alternate ID"]
+    ws.cell(row=row, column=1, value=str(site_id) if site_id is not None else None)
+    ws.cell(row=row, column=2, value=branch["Funded Date"])
+    ws.cell(row=row, column=3, value=branch["Site Name"])
+    ws.cell(row=row, column=4, value=product)
+    ws.cell(
+        row=row,
+        column=5,
+        value=float(amount) if pd.notna(amount) else None,
+    )
+
+
+def _write_branch(
+    ws: Worksheet,
+    start_row: int,
+    branch: dict,
+    *,
+    draw_branch_box: bool,
+    always_sum: bool,
+) -> int:
+    rows = branch["rows"]
+    amex = [(p, a) for p, a in rows if str(p) == "Amex"]
+    others = [(p, a) for p, a in rows if str(p) != "Amex"]
+    others.sort(key=lambda x: _product_key(x[0]))
+
+    cur = start_row
+    for product, amount in amex:
+        _write_data_row(ws, cur, branch, product, amount)
+        cur += 1
+
+    if others:
+        box_top = cur
+        for product, amount in others:
+            _write_data_row(ws, cur, branch, product, amount)
+            cur += 1
+        box_bottom = cur - 1
+        if draw_branch_box:
+            _draw_thick_box(ws, box_top, box_bottom)
+        single_row = box_top == box_bottom
+        had_amex = bool(amex)
+        if always_sum or had_amex or not single_row:
+            ws.cell(
+                row=box_bottom,
+                column=6,
+                value=f"=SUM(E{box_top}:E{box_bottom})",
+            )
+
+    return cur
+
+
+def write_workbook(raw_bytes: bytes, sections: list[tuple[str, list[dict], pd.DataFrame]]) -> bytes:
     wb = load_workbook(io.BytesIO(raw_bytes))
     if "Formatted" in wb.sheetnames:
         del wb["Formatted"]
     ws = wb.create_sheet("Formatted", 0)
 
-    ws.append(OUT_COLS)
-    first = True
-    for label, df in sections:
-        if first:
-            first = False
+    for col_idx, name in enumerate(OUT_COLS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=name)
+        cell.font = BOLD
+        _apply_border(cell, bottom=THIN)
+
+    cur = 2
+    seen_section = False
+    for label, branches, _ in sections:
+        if not branches:
+            continue
+        if label == NET_SALES_SHEET:
+            for branch in branches:
+                cur = _write_branch(
+                    ws, cur, branch, draw_branch_box=True, always_sum=False
+                )
+            seen_section = True
         else:
-            ws.append([])
-            ws.append([f"From: {label}"])
-        for site_id, funded, site_name, product, amount in df.itertuples(index=False):
-            ws.append(
-                [
-                    site_id,
-                    funded,
-                    site_name,
-                    product,
-                    float(amount) if pd.notna(amount) else None,
-                ]
-            )
+            if seen_section:
+                cur += 1  # blank separator row before appended sections
+            section_top = cur
+            header_cell = ws.cell(row=section_top, column=1, value=f"From: {label}")
+            header_cell.font = BOLD
+            _apply_border(header_cell, right=THICK)
+            cur = section_top + 1
+            for branch in branches:
+                cur = _write_branch(
+                    ws, cur, branch, draw_branch_box=False, always_sum=True
+                )
+            section_bottom = cur - 1
+            _draw_thick_box(ws, section_top, section_bottom)
+            seen_section = True
 
     out = io.BytesIO()
     wb.save(out)
@@ -151,8 +257,6 @@ def write_workbook(raw_bytes: bytes, sections: list[tuple[str, pd.DataFrame]]) -
 
 
 def trigger_browser_download(data: bytes, filename: str, token: str) -> None:
-    """Auto-download via a hidden anchor click. Keyed on `token` so a given
-    upload only auto-downloads once per session even as Streamlit reruns."""
     if st.session_state.get("_last_auto_download") == token:
         return
     st.session_state["_last_auto_download"] = token
@@ -222,7 +326,7 @@ def main() -> None:
     )
 
     st.subheader("Preview")
-    for label, df in sections:
+    for label, _, df in sections:
         if label != NET_SALES_SHEET:
             st.markdown(f"**From: {label}**")
         st.dataframe(df, use_container_width=True, hide_index=True)
