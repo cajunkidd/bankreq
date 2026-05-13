@@ -307,6 +307,8 @@ WF_RAW_COLS = [
 WF_MONEY_FMT = '"$"#,##0.00_);[Red]("$"#,##0.00)'
 WF_DATE_FMT = "mm-dd-yy"
 WF_COL_WIDTHS = {"A": 11.43, "B": 9.71, "E": 18.86, "F": 10.0, "G": 9.86, "I": 10.86}
+WF_SUM_FONT = Font(bold=True, size=14)
+WF_SUM_ROW_HEIGHT = 20
 
 
 def _wf_parse_money(value: object) -> float | None:
@@ -452,6 +454,8 @@ def write_wells_fargo_workbook(df: pd.DataFrame) -> bytes:
                     value=f"=SUM({col_letter}{group_start}:{col_letter}{group_end})",
                 )
                 cell.number_format = WF_MONEY_FMT
+                cell.font = WF_SUM_FONT
+            ws.row_dimensions[cur].height = WF_SUM_ROW_HEIGHT
             cur += 1
 
     for col_letter, width in WF_COL_WIDTHS.items():
