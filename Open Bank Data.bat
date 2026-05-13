@@ -128,10 +128,19 @@ REM finished booting.
 start /b "" powershell -NoProfile -WindowStyle Hidden -Command "$u='http://localhost:%PORT%'; $deadline=(Get-Date).AddSeconds(90); while((Get-Date) -lt $deadline) { try { Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 1 | Out-Null; Start-Process $u; break } catch { Start-Sleep -Milliseconds 500 } }"
 
 "%PYEXE%" -m streamlit run "%APP%" --server.port %PORT% --server.headless true --browser.gatherUsageStats false
+set "STREAMLIT_EXIT=%errorlevel%"
+
+echo.
+echo ============================================================
+echo Streamlit exited with code %STREAMLIT_EXIT%.
+echo If the app stopped unexpectedly, the error message is above.
+echo ============================================================
+echo.
+pause
 
 popd
 endlocal
-exit /b 0
+exit /b %STREAMLIT_EXIT%
 
 
 REM =========================================================================
