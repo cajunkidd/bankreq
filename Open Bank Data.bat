@@ -40,21 +40,38 @@ set "BRANCH=claude/add-features-improvements-f9al2"
 set "BASE_URL=https://raw.githubusercontent.com/cajunkidd/bankreq/%BRANCH%"
 
 REM ---- Verify Python ------------------------------------------------------
+REM Streamlit's transitive deps (pyarrow, pandas) ship prebuilt wheels for
+REM Python 3.11 / 3.12 / 3.13. Versions like 3.14 / 3.15 force a source
+REM build that needs a C++ compiler and almost always fails on user
+REM machines, so we explicitly prefer the supported versions.
 set "PY="
-where py >nul 2>nul && set "PY=py -3"
+py -3.13 -c "" >nul 2>nul && set "PY=py -3.13"
 if not defined PY (
-    where python >nul 2>nul && set "PY=python"
+    py -3.12 -c "" >nul 2>nul && set "PY=py -3.12"
+)
+if not defined PY (
+    py -3.11 -c "" >nul 2>nul && set "PY=py -3.11"
 )
 if not defined PY (
     echo.
-    echo [ERROR] Python is not installed or not on PATH.
+    echo [ERROR] Python 3.11, 3.12, or 3.13 is required.
     echo.
-    echo Install Python 3.10+ from https://www.python.org/downloads/
+    echo Install Python 3.13 from https://www.python.org/downloads/
     echo IMPORTANT: check "Add Python to PATH" during the installer.
+    echo.
+    echo (Newer Python versions like 3.14 or 3.15 are not yet supported by
+    echo  all required packages and will fail with a build error.)
     echo.
     pause
     exit /b 1
 )
+echo Using %PY%.
+
+REM Some users have AppData redirected to a network share, which causes
+REM "Permission denied" errors when pip tries to read or write its wheel
+REM cache. Disable the cache entirely so pip never touches that folder.
+set "PIP_NO_CACHE_DIR=1"
+set "PIP_DISABLE_PIP_VERSION_CHECK=1"
 
 REM ---- Fetch latest source files from GitHub ------------------------------
 echo Checking for the latest version on GitHub...
@@ -74,6 +91,16 @@ call :fetch "%REQS%" "%BASE_URL%/%REQS%"
 call :fetch "%LOGO%" "%BASE_URL%/%LOGO%"
 
 REM ---- Create venv + install deps on first run ----------------------------
+REM If a venv from a previous run uses an incompatible Python (e.g. 3.15),
+REM nuke it so we can rebuild against the supported interpreter found above.
+if exist "%PYEXE%" (
+    "%PYEXE%" -c "import sys; raise SystemExit(0 if (3,11) <= sys.version_info[:2] <= (3,13) else 1)" 2>nul
+    if errorlevel 1 (
+        echo Existing virtualenv uses an incompatible Python version - recreating...
+        rmdir /s /q "%VENV%"
+    )
+)
+
 if not exist "%PYEXE%" (
     echo First-time setup: creating local Python environment...
     %PY% -m venv "%VENV%" || (
@@ -85,8 +112,8 @@ if not exist "%PYEXE%" (
 
 if not exist "%VENV%\.deps_installed" (
     echo Installing dependencies ^(one-time, ~30-60 seconds^)...
-    "%PYEXE%" -m pip install --upgrade pip >nul
-    "%PYEXE%" -m pip install -r "%REQS%" || (
+    "%PYEXE%" -m pip install --no-cache-dir --upgrade pip >nul
+    "%PYEXE%" -m pip install --no-cache-dir -r "%REQS%" || (
         echo [ERROR] pip install failed.
         pause
         exit /b 1
