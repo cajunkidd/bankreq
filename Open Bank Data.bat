@@ -117,9 +117,16 @@ if not exist "%VENV%\.deps_installed" (
 REM ---- Launch -------------------------------------------------------------
 echo.
 echo Starting Stine BankReq Reformatter at http://localhost:%PORT% ...
+echo Your browser will open automatically once the server is ready.
 echo Close this window to stop the app.
 echo.
-start "" "http://localhost:%PORT%"
+
+REM Spawn a background PowerShell that polls the local server and opens the
+REM browser as soon as it responds. Doing this in the background avoids the
+REM "can't connect" race you get when the URL is opened before Streamlit has
+REM finished booting.
+start /b "" powershell -NoProfile -WindowStyle Hidden -Command "$u='http://localhost:%PORT%'; $deadline=(Get-Date).AddSeconds(90); while((Get-Date) -lt $deadline) { try { Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 1 | Out-Null; Start-Process $u; break } catch { Start-Sleep -Milliseconds 500 } }"
+
 "%PYEXE%" -m streamlit run "%APP%" --server.port %PORT% --server.headless true --browser.gatherUsageStats false
 
 popd
