@@ -306,7 +306,7 @@ WF_RAW_COLS = [
 ]
 WF_MONEY_FMT = '"$"#,##0.00_);[Red]("$"#,##0.00)'
 WF_DATE_FMT = "mm-dd-yy"
-WF_COL_WIDTHS = {"A": 11.43, "B": 9.71, "E": 18.86, "F": 10.0, "G": 9.86, "I": 10.86}
+WF_COL_WIDTHS = {"A": 11.43, "B": 9.71, "E": 18.86, "F": 10.0, "G": 15.0, "H": 13.0, "I": 15.0}
 WF_SUM_FONT = Font(bold=True, size=14)
 WF_SUM_ROW_HEIGHT = 20
 
