@@ -115,19 +115,25 @@ if not exist "%VENV%\.deps_installed" (
 )
 
 REM ---- Launch -------------------------------------------------------------
+REM Pre-create streamlit credentials so the first-run email prompt does not
+REM block startup. Without this, streamlit asks for an email on stdin the
+REM very first time it runs, which prevents the browser from auto-opening.
+if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit" >nul 2>&1
+if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
+    > "%USERPROFILE%\.streamlit\credentials.toml" echo [general]
+    >> "%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
+)
+
 echo.
 echo Starting Stine BankReq Reformatter at http://localhost:%PORT% ...
 echo Your browser will open automatically once the server is ready.
 echo Close this window to stop the app.
 echo.
 
-REM Spawn a background PowerShell that polls the local server and opens the
-REM browser as soon as it responds. Doing this in the background avoids the
-REM "can't connect" race you get when the URL is opened before Streamlit has
-REM finished booting.
-start /b "" powershell -NoProfile -WindowStyle Hidden -Command "$u='http://localhost:%PORT%'; $deadline=(Get-Date).AddSeconds(90); while((Get-Date) -lt $deadline) { try { Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 1 | Out-Null; Start-Process $u; break } catch { Start-Sleep -Milliseconds 500 } }"
-
-"%PYEXE%" -m streamlit run "%APP%" --server.port %PORT% --server.headless true --browser.gatherUsageStats false
+REM Drop --server.headless so streamlit polls its own readiness and opens
+REM the default browser via Python's webbrowser module. This is the most
+REM reliable autolaunch path - no PowerShell race, no execution-policy gotchas.
+"%PYEXE%" -m streamlit run "%APP%" --server.port %PORT% --server.address localhost --browser.serverAddress localhost --browser.gatherUsageStats false
 set "STREAMLIT_EXIT=%errorlevel%"
 
 echo.
