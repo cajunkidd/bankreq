@@ -11,7 +11,24 @@ REM Requires Python 3.10+ from https://www.python.org/downloads/
 REM (be sure to check "Add Python to PATH" during install).
 
 setlocal EnableDelayedExpansion
-cd /d "%~dp0"
+
+REM cmd.exe refuses to use a UNC path (\\server\share\...) as the current
+REM directory, which is common when a user keeps this .bat on a roaming or
+REM redirected Desktop. pushd transparently maps a UNC path to a temporary
+REM drive letter so the rest of the script can run.
+pushd "%~dp0" 2>nul
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Could not enter the folder containing this script:
+    echo   %~dp0
+    echo.
+    echo If that path starts with "\\" it is a network share. Try copying
+    echo "Open Bank Data.bat" to a local folder like C:\BankReq and running
+    echo it from there instead.
+    echo.
+    pause
+    exit /b 1
+)
 
 set "APP=app.py"
 set "REQS=requirements.txt"
@@ -85,6 +102,7 @@ echo.
 start "" "http://localhost:%PORT%"
 "%PYEXE%" -m streamlit run "%APP%" --server.port %PORT% --server.headless true --browser.gatherUsageStats false
 
+popd
 endlocal
 exit /b 0
 
