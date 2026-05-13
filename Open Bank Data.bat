@@ -1,14 +1,12 @@
 @echo off
 REM Stine BankReq Reformatter - self-bootstrapping launcher.
 REM Drop this .bat file into ANY folder and double-click it. It will:
-REM   1. Verify Python 3 is installed (and prompt to install if not).
+REM   1. Auto-install Python 3.13 (per-user, no admin) if no supported
+REM      Python is detected.
 REM   2. Download the latest app.py, requirements.txt, and logo from GitHub.
 REM   3. Create a local Python virtual environment on first run.
 REM   4. Install dependencies (one-time).
 REM   5. Launch the app in your default browser at http://localhost:8501.
-REM
-REM Requires Python 3.11, 3.12, or 3.13 from https://www.python.org/downloads/
-REM (be sure to check "Add Python to PATH" during install).
 
 setlocal EnableExtensions EnableDelayedExpansion
 
@@ -16,10 +14,9 @@ echo.
 echo === Stine BankReq Reformatter launcher ===
 echo.
 
-REM cmd.exe refuses to use a UNC path (\\server\share\...) as the current
-REM directory, which is common when a user keeps this .bat on a roaming or
-REM redirected Desktop. pushd transparently maps a UNC path to a temporary
-REM drive letter so the rest of the script can run.
+REM cmd.exe refuses to use a UNC path as the current directory, which is
+REM common when the Desktop is on a roaming network share. pushd maps
+REM UNC paths to a temporary drive letter so the rest of the script can run.
 pushd "%~dp0" 2>nul
 if errorlevel 1 (
     echo.
@@ -42,41 +39,33 @@ set "PYEXE=%VENV%\Scripts\python.exe"
 set "PORT=8501"
 set "BRANCH=claude/add-features-improvements-f9al2"
 set "BASE_URL=https://raw.githubusercontent.com/cajunkidd/bankreq/%BRANCH%"
+set "PY_VERSION=3.13.3"
+set "PY_URL=https://www.python.org/ftp/python/%PY_VERSION%/python-%PY_VERSION%-amd64.exe"
 
-REM ---- Verify Python ------------------------------------------------------
-REM Streamlit's transitive deps (pyarrow, pandas) ship prebuilt wheels for
-REM Python 3.11 / 3.12 / 3.13. Versions like 3.14 / 3.15 force a source
-REM build that needs a C++ compiler and almost always fails on user
-REM machines, so we explicitly prefer the supported versions.
+REM Disable pip cache. AppData is sometimes on a network share and the
+REM cache then triggers "Permission denied" errors.
+set "PIP_NO_CACHE_DIR=1"
+set "PIP_DISABLE_PIP_VERSION_CHECK=1"
+
+REM ---- Locate a supported Python interpreter -----------------------------
 set "PY="
-py -3.13 -c "" >nul 2>nul && set "PY=py -3.13"
-if not defined PY (
-    py -3.12 -c "" >nul 2>nul && set "PY=py -3.12"
-)
-if not defined PY (
-    py -3.11 -c "" >nul 2>nul && set "PY=py -3.11"
-)
+call :find_py 3.13
+if not defined PY call :find_py 3.12
+if not defined PY call :find_py 3.11
+if not defined PY call :install_python
 if not defined PY (
     echo.
-    echo [ERROR] Python 3.11, 3.12, or 3.13 is required.
+    echo [ERROR] Could not install or locate Python 3.13.
     echo.
-    echo Install Python 3.13 from https://www.python.org/downloads/
-    echo IMPORTANT: check "Add Python to PATH" during the installer.
-    echo.
-    echo Note: newer Python versions such as 3.14 or 3.15 are not yet
-    echo supported by all required packages and will fail with a build
-    echo error.
+    echo Please install Python 3.13 manually from:
+    echo   https://www.python.org/downloads/
+    echo and check "Add Python to PATH" during the installer.
     echo.
     pause
     exit /b 1
 )
-echo Using %PY%.
-
-REM Some users have AppData redirected to a network share, which causes
-REM "Permission denied" errors when pip tries to read or write its wheel
-REM cache. Disable the cache entirely so pip never touches that folder.
-set "PIP_NO_CACHE_DIR=1"
-set "PIP_DISABLE_PIP_VERSION_CHECK=1"
+echo Using Python at: !PY!
+echo.
 
 REM ---- Fetch latest source files from GitHub ------------------------------
 echo Checking for the latest version on GitHub...
@@ -96,8 +85,7 @@ call :fetch "%REQS%" "%BASE_URL%/%REQS%"
 call :fetch "%LOGO%" "%BASE_URL%/%LOGO%"
 
 REM ---- Create venv + install deps on first run ----------------------------
-REM If a venv from a previous run uses an incompatible Python (e.g. 3.15),
-REM nuke it so we can rebuild against the supported interpreter found above.
+REM If a previous venv used an incompatible Python (e.g. 3.15), recreate it.
 if exist "%PYEXE%" (
     "%PYEXE%" -c "import sys; ok = sys.version_info[0]==3 and 11 <= sys.version_info[1] <= 13; raise SystemExit(0 if ok else 1)" 2>nul
     if errorlevel 1 (
@@ -108,7 +96,7 @@ if exist "%PYEXE%" (
 
 if not exist "%PYEXE%" (
     echo First-time setup: creating local Python environment...
-    %PY% -m venv "%VENV%" || (
+    "!PY!" -m venv "%VENV%" || (
         echo [ERROR] venv creation failed.
         pause
         exit /b 1
@@ -116,7 +104,7 @@ if not exist "%PYEXE%" (
 )
 
 if not exist "%VENV%\.deps_installed" (
-    echo Installing dependencies ^(one-time, ~30-60 seconds^)...
+    echo Installing dependencies, one-time, about 30 to 60 seconds...
     "%PYEXE%" -m pip install --no-cache-dir --upgrade pip >nul
     "%PYEXE%" -m pip install --no-cache-dir -r "%REQS%" || (
         echo [ERROR] pip install failed.
@@ -140,10 +128,44 @@ exit /b 0
 
 
 REM =========================================================================
+REM :find_py <version>
+REM Looks up python.exe for the requested major.minor and stores the full
+REM path in PY. Does nothing if the interpreter is not available.
+REM =========================================================================
+:find_py
+for /f "delims=" %%P in ('py -%1 -c "import sys; print(sys.executable)" 2^>nul') do set "PY=%%P"
+exit /b 0
+
+REM =========================================================================
+REM :install_python
+REM Downloads the official Python installer and runs it per-user (no admin
+REM required). On success, stores the resulting python.exe path in PY.
+REM =========================================================================
+:install_python
+echo No supported Python version was found on this computer.
+echo Downloading Python %PY_VERSION% installer, about 28 MB...
+set "PY_INSTALLER=%TEMP%\python-%PY_VERSION%-installer.exe"
+call :fetch "%PY_INSTALLER%" "%PY_URL%"
+if errorlevel 1 (
+    echo [ERROR] Could not download the Python installer.
+    echo Check your internet connection and try again.
+    exit /b 0
+)
+echo Installing Python %PY_VERSION% per-user. No admin password is needed.
+echo A small progress bar may appear briefly.
+"%PY_INSTALLER%" /passive InstallAllUsers=0 PrependPath=1 Include_test=0 Include_launcher=1
+del "%PY_INSTALLER%" 2>nul
+REM Locate the freshly installed Python. Per-user installs land in
+REM %LOCALAPPDATA%\Programs\Python\Python313\.
+if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" (
+    set "PY=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+)
+exit /b 0
+
+REM =========================================================================
 REM :fetch <local-path> <remote-url>
-REM Downloads the remote URL into the local path. Tries curl first (built into
-REM Windows 10 1803+ and Windows 11), falls back to PowerShell.
-REM Returns errorlevel 0 on success, non-zero on failure.
+REM Downloads the remote URL into the local path. Tries curl first, then
+REM PowerShell. Returns errorlevel 0 on success, non-zero on failure.
 REM =========================================================================
 :fetch
 where curl >nul 2>nul
