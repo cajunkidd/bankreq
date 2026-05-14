@@ -48,6 +48,6 @@ echo Starting Bank Data Viewer at http://localhost:%PORT% ...
 echo Close this window to stop the app.
 echo.
 start "" "http://localhost:%PORT%"
-"%PYEXE%" -m streamlit run "%APP%" --server.port %PORT% --server.headless true --browser.gatherUsageStats false
+"%PYEXE%" -m streamlit run "%APP%" --server.port %PORT% --server.headless true --browser.gatherUsageStats false --client.toolbarMode minimal
 
 endlocal

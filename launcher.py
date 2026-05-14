@@ -276,6 +276,7 @@ def main() -> None:
     os.environ["STREAMLIT_SERVER_ADDRESS"] = "127.0.0.1"
     os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
     os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+    os.environ["STREAMLIT_CLIENT_TOOLBAR_MODE"] = "minimal"
 
     flag_options = {
         "browser.gatherUsageStats": False,
@@ -287,6 +288,7 @@ def main() -> None:
         "server.fileWatcherType": "none",
         "server.runOnSave": False,
         "global.developmentMode": False,
+        "client.toolbarMode": "minimal",
     }
 
     _diagnose_bundle()
