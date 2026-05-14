@@ -23,6 +23,8 @@ st.set_page_config(page_title="Stine CardConnect Reformatter", layout="wide")
 st.markdown(
     """
     <style>
+    header[data-testid="stHeader"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
     .stDeployButton {display: none !important;}
     [data-testid="stDeployButton"] {display: none !important;}
     [data-testid="stAppDeployButton"] {display: none !important;}
