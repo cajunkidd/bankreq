@@ -25,6 +25,7 @@ st.markdown(
     <style>
     .stDeployButton {display: none !important;}
     [data-testid="stDeployButton"] {display: none !important;}
+    [data-testid="stAppDeployButton"] {display: none !important;}
     </style>
     """,
     unsafe_allow_html=True,
